@@ -22,7 +22,10 @@ def route_tools(
     if has_photo:
         calls.append(RoutedToolCall("reverse_image", {}))
 
-    if re.search(r"(погод\w*|weather|forecast|temperature|temperatur)", lower):
+    if re.search(
+        r"(погод\w*|weather|forecast|temperature|temperatur|температур\w*|градус\w*)",
+        lower,
+    ):
         calls.append(RoutedToolCall("ha_query", {"query": "weather"}))
 
     if re.search(
@@ -67,7 +70,8 @@ def is_ha_factual_query(text: str) -> bool:
     lower = text.lower()
     return bool(
         re.search(
-            r"\b(курс|долар|dollar|usd|eur|євро|погод|weather|бензин|fuel|азс)\b",
+            r"(курс|долар|dollar|usd|eur|євро|погод|weather|бензин|fuel|азс|"
+            r"температур|temperature|градус)",
             lower,
         )
     )

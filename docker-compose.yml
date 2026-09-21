@@ -11,6 +11,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b-mlx}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://10.10.30.18:8123}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

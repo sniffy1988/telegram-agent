@@ -30,6 +30,22 @@ CI uses `docker compose -f docker-compose.yml -f docker-compose.ci.yml build --p
 
 Persistent memory is stored in `./data/memory.json`.
 
+### Logs (investigation)
+
+```bash
+docker compose logs -f familyai
+```
+
+Set **`LOG_LEVEL=DEBUG`** in `.env` and restart for more detail (tool routing, HA entity matches, Ollama timing). Tokens are never logged.
+
+Useful lines:
+
+- `[startup]` — Ollama URL, model, HA URL, whether HA token is set
+- `[agent] routed tools` — which tools run for the message
+- `[ha]` — Home Assistant HTTP and matched entities
+- `[tool]` — `ok=` / `error=` per tool
+- `[ollama]` — queue wait and generation time
+
 ## Native (no Docker)
 
 ```bash

@@ -61,18 +61,20 @@ class HomeAssistantTool:
         if not query:
             return {"ok": False, "error": "empty_query", "states": []}
         if not self.token:
+            logger.warning("[ha] skipped: HOME_ASSISTANT_TOKEN not configured")
             return {
                 "ok": False,
                 "error": "home_assistant_not_configured",
                 "states": [],
             }
         try:
+            url = f"{self.base_url}/api/states"
+            logger.info("[ha] GET %s query=%r", url, query)
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 headers = {"Authorization": f"Bearer {self.token}"}
-                resp = await client.get(
-                    f"{self.base_url}/api/states", headers=headers
-                )
+                resp = await client.get(url, headers=headers)
                 if resp.status_code >= 400:
+                    logger.warning("[ha] HTTP %s from %s", resp.status_code, url)
                     return {
                         "ok": False,
                         "error": f"home_assistant_http_{resp.status_code}",
@@ -80,8 +82,10 @@ class HomeAssistantTool:
                     }
                 all_states = resp.json()
         except httpx.TimeoutException:
+            logger.warning("[ha] timeout url=%s", self.base_url)
             return {"ok": False, "error": "home_assistant_timeout", "states": []}
-        except httpx.RequestError:
+        except httpx.RequestError as exc:
+            logger.warning("[ha] unreachable url=%s err=%s", self.base_url, exc)
             return {"ok": False, "error": "home_assistant_unreachable", "states": []}
 
         if not isinstance(all_states, list):
@@ -98,7 +102,15 @@ class HomeAssistantTool:
 
         q_lower = query.lower()
         topic_keywords = {
-            "weather": ("weather", "open_meteo", "temperature", "погод"),
+            "weather": (
+                "weather",
+                "open_meteo",
+                "temperature",
+                "temperatur",
+                "погод",
+                "температур",
+                "градус",
+            ),
             "fuel": ("fuel", "ukr_fuel", "азс", "бензин", "дизел", "socar", "wog", "okko"),
             "usd": ("usd", "dollar", "долар", "cartel", "obmenka"),
             "eur": ("eur", "euro", "євро", "eur/usd"),
@@ -116,7 +128,25 @@ class HomeAssistantTool:
             fname = str(attrs.get("friendly_name", "")).lower()
             blob = f"{eid} {fname}".lower()
             if topic == "weather" and (
-                eid.startswith("weather.") or "open_meteo" in eid or "weather" in blob
+                eid.startswith("weather.")
+                or "open_meteo" in eid
+                or "weather" in blob
+                or "temperature" in blob
+                or "temperatur" in blob
+                or "температур" in blob
+                or (
+                    eid.startswith("sensor.")
+                    and any(
+                        x in blob
+                        for x in (
+                            "temperature",
+                            "temperatur",
+                            "температур",
+                            "outdoor",
+                            "open_meteo",
+                        )
+                    )
+                )
             ):
                 matches.append(_compact_state(st))
             elif topic == "fuel" and (
@@ -163,6 +193,18 @@ class HomeAssistantTool:
                 }
 
         if not matches:
+            logger.info(
+                "[ha] no matches topic=%s query=%r allowlisted_states=%s",
+                topic,
+                query,
+                len(filtered),
+            )
             return {"ok": False, "error": "no_matching_entities", "states": []}
 
+        logger.info(
+            "[ha] matched %s entities (topic=%s): %s",
+            len(matches),
+            topic,
+            [m.get("entity_id") for m in matches[:5]],
+        )
         return {"ok": True, "states": matches[:15]}

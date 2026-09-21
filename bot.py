@@ -17,6 +17,7 @@ from telegram.ext import (
 
 from agent import Agent
 from config import load_settings
+from logging_config import configure_logging
 from conversation import clear_history
 from memory import MemoryStore
 from ollama_client import OllamaClient, _model_lock
@@ -34,10 +35,6 @@ from tools_ha import HomeAssistantTool
 from tools_image import ReverseImageTool
 from tools_web import ImageSearchTool, WebSearchTool, download_image
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 FORGET_CONFIRM_PREFIX = "forget:"
@@ -163,7 +160,14 @@ async def _process_message(
 
     chat_id = update.effective_chat.id
     user_message = update.effective_message
-    logger.info("[telegram] chat_id=%s received message", chat_id)
+    preview = (user_text or caption or "(photo)")[:120]
+    logger.info(
+        "[telegram] chat_id=%s message_id=%s photo=%s text=%r",
+        chat_id,
+        user_message.message_id,
+        has_photo,
+        preview,
+    )
 
     status_msg = await user_message.get_bot().send_message(
         chat_id=user_message.chat_id,
@@ -307,7 +311,16 @@ def build_registry(settings) -> ToolRegistry:
 
 
 def main() -> None:
+    configure_logging()
     settings = load_settings()
+    logger.info(
+        "[startup] ollama=%s model=%s ha=%s ha_token=%s memory=%s",
+        settings.ollama_url,
+        settings.ollama_model,
+        settings.home_assistant_url,
+        "set" if settings.home_assistant_token else "missing",
+        settings.memory_path,
+    )
     memory = MemoryStore(settings.memory_path)
     ollama = OllamaClient(
         settings.ollama_url, settings.ollama_model, settings.ollama_timeout

@@ -20,3 +20,11 @@ def test_route_search_and_photo() -> None:
 
 def test_is_ha_factual() -> None:
     assert is_ha_factual_query("курс доллара")
+    assert is_ha_factual_query("какая температура сейчас?")
+
+
+def test_route_temperature() -> None:
+    calls = route_tools("какая температура сейчас?", has_photo=False)
+    assert any(
+        c.name == "ha_query" and c.arguments["query"] == "weather" for c in calls
+    )

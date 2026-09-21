@@ -53,6 +53,7 @@ Rules:
 - For potentially destructive operations, ask for confirmation before executing them.
 - Never execute arbitrary shell commands unless a specifically approved tool allows it.
 - Keep responses reasonably short unless the user asks for detail.
+- Never suggest calling emergency services (112, 103, 911, etc.) unless the user explicitly describes an emergency.
 
 You have access to persistent memory and conversation history, but memory may be incomplete or outdated. Treat it as context, not absolute truth.
 """
@@ -81,15 +82,58 @@ def _build_system_prompt(memory_block: str) -> str:
     return "\n\n".join(parts)
 
 
-def _ha_failure_message(user_text: str) -> str:
+def _ha_failure_message(user_text: str, error: str | None = None) -> str:
+    if error == "home_assistant_not_configured":
+        return (
+            "Home Assistant не настроен: укажите HOME_ASSISTANT_TOKEN в .env "
+            "и перезапустите бота."
+        )
+    if error == "home_assistant_unreachable":
+        return (
+            "Не удалось подключиться к Home Assistant. Проверьте HOME_ASSISTANT_URL "
+            "и доступ с сервера/контейнера до HA."
+        )
+    if error == "no_matching_entities":
+        lower = user_text.lower()
+        if any(w in lower for w in ("температур", "temperature", "градус", "погод", "weather")):
+            return (
+                "Не нашёл в Home Assistant датчики погоды/температуры "
+                "(weather.* или open-meteo)."
+            )
+        return "Не нашёл в Home Assistant подходящих датчиков для этого запроса."
+
     lower = user_text.lower()
     if any(w in lower for w in ("курс", "долар", "dollar", "usd", "eur", "євро", "obmenka")):
         return "Не смог получить текущий курс из Home Assistant."
+    if any(w in lower for w in ("температур", "temperature", "градус")):
+        return "Не смог получить температуру из Home Assistant."
     if any(w in lower for w in ("погод", "weather")):
         return "Не смог получить погоду из Home Assistant."
     if any(w in lower for w in ("бензин", "fuel", "азс", "палив")):
         return "Не смог получить цены на топливо из Home Assistant."
     return "Не смог получить запрошенные данные из Home Assistant."
+
+
+def _should_short_circuit_ha_failure(
+    text: str, tool_results: dict[str, dict[str, Any]]
+) -> bool:
+    if "ha_query" not in tool_results:
+        return False
+    if tool_results["ha_query"].get("ok"):
+        return False
+    # HA was queried and failed — never let the LLM invent weather/FX/fuel values.
+    return True
+
+
+def _safe_tool_log(payload: dict[str, Any]) -> dict[str, Any]:
+    """Trim tool payload for logs (no huge lists)."""
+    out: dict[str, Any] = {"ok": payload.get("ok"), "error": payload.get("error")}
+    for key in ("states", "results", "images", "matches"):
+        if key in payload and isinstance(payload[key], list):
+            out[f"{key}_count"] = len(payload[key])
+            if payload[key]:
+                out[f"{key}_sample"] = payload[key][:2]
+    return out
 
 
 def _collect_photos(tool_name: str, payload: dict[str, Any]) -> list[PhotoAttachment]:
@@ -154,6 +198,13 @@ class Agent:
         text_for_routing = (user_text or caption).strip()
 
         routed = route_tools(text_for_routing, has_photo=has_photo)
+        if routed:
+            logger.info(
+                "[agent] routed tools: %s",
+                [(c.name, c.arguments) for c in routed],
+            )
+        else:
+            logger.debug("[agent] no deterministic tool routes for this message")
         tool_results: dict[str, dict[str, Any]] = {}
         photos: list[PhotoAttachment] = []
         used_tools: list[str] = []
@@ -173,18 +224,27 @@ class Agent:
                 tool_results[call.name] = payload
                 used_tools.append(call.name)
                 photos.extend(_collect_photos(call.name, payload))
-
-        if is_ha_factual_query(text_for_routing) and "ha_query" in tool_results:
-            ha = tool_results["ha_query"]
-            if not ha.get("ok"):
-                msg = _ha_failure_message(text_for_routing)
-                append_turn(
-                    chat_id,
-                    text_for_routing,
-                    msg,
-                    max_messages=self.settings.max_history_messages,
+                logger.info(
+                    "[tool] %s ok=%s error=%s",
+                    call.name,
+                    payload.get("ok"),
+                    payload.get("error"),
                 )
-                return AgentResult(text=msg, photos=photos, used_tools=used_tools)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("[tool] %s payload=%s", call.name, _safe_tool_log(payload))
+
+        if _should_short_circuit_ha_failure(text_for_routing, tool_results):
+            ha = tool_results["ha_query"]
+            err = ha.get("error") if isinstance(ha.get("error"), str) else None
+            msg = _ha_failure_message(text_for_routing, err)
+            logger.info("[agent] HA query failed (%s), short-circuit reply", err)
+            append_turn(
+                chat_id,
+                text_for_routing,
+                msg,
+                max_messages=self.settings.max_history_messages,
+            )
+            return AgentResult(text=msg, photos=photos, used_tools=used_tools)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         for turn in history:
@@ -240,12 +300,12 @@ class Agent:
                         used_tools.append(name)
                         photos.extend(_collect_photos(name, payload))
                     if tool_results:
-                        if (
-                            is_ha_factual_query(text_for_routing)
-                            and "ha_query" in tool_results
-                            and not tool_results["ha_query"].get("ok")
+                        if _should_short_circuit_ha_failure(
+                            text_for_routing, tool_results
                         ):
-                            msg_text = _ha_failure_message(text_for_routing)
+                            err = tool_results["ha_query"].get("error")
+                            err = err if isinstance(err, str) else None
+                            msg_text = _ha_failure_message(text_for_routing, err)
                             append_turn(
                                 chat_id,
                                 text_for_routing,

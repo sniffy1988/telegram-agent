@@ -45,4 +45,24 @@ async def test_ha_failure_short_circuit_no_invented_rate(tmp_path) -> None:
     result = await agent.handle(1, "какой сейчас курс доллара?")
     assert "Home Assistant" in result.text
     assert "41" not in result.text
+    assert "112" not in result.text
+    ollama.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_temperature_routes_ha_failure_short_circuit(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    reg = ToolRegistry()
+    ha = HomeAssistantTool("http://ha", "")
+
+    async def fail_ha(arguments, context):
+        return {"ok": False, "error": "home_assistant_not_configured", "states": []}
+
+    ha.execute = fail_ha  # type: ignore[method-assign]
+    reg.register(ha)
+    agent = Agent(_settings(tmp_path), memory, ollama, reg)
+
+    result = await agent.handle(1, "какая температура сейчас?")
+    assert "HOME_ASSISTANT_TOKEN" in result.text
     ollama.chat.assert_not_called()
