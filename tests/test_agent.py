@@ -53,7 +53,6 @@ async def test_ha_failure_short_circuit_no_invented_rate(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_pollen_success_short_circuit_factual_list(tmp_path) -> None:
     memory = MemoryStore(tmp_path / "m.json")
     ollama = AsyncMock()
@@ -107,4 +106,63 @@ async def test_temperature_routes_ha_failure_short_circuit(tmp_path) -> None:
 
     result = await agent.handle(1, "какая температура сейчас?")
     assert "HOME_ASSISTANT_TOKEN" in result.text
+    ollama.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_weather_success_short_circuit(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    ollama.chat = AsyncMock(return_value={"content": "fake 99C"})
+    reg = ToolRegistry()
+    ha = HomeAssistantTool("http://ha", "t")
+
+    async def weather_ok(arguments, context):
+        return {
+            "ok": True,
+            "states": [
+                {
+                    "entity_id": "sensor.saveecobot_outdoor_temperature",
+                    "friendly_name": "SaveEcoBot Outdoor Temperature",
+                    "state": "24.5",
+                    "unit": "°C",
+                },
+            ],
+        }
+
+    ha.execute = weather_ok  # type: ignore[method-assign]
+    reg.register(ha)
+    agent = Agent(_settings(tmp_path), memory, ollama, reg)
+    result = await agent.handle(1, "какая температура?")
+    assert "24.5" in result.text
+    assert "fake" not in result.text
+    ollama.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_usd_success_short_circuit(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    ollama.chat = AsyncMock(return_value={"content": "45.5"})
+    reg = ToolRegistry()
+    ha = HomeAssistantTool("http://ha", "t")
+
+    async def usd_ok(arguments, context):
+        return {
+            "ok": True,
+            "states": [
+                {
+                    "entity_id": "sensor.cartel_usd_buy",
+                    "friendly_name": "Cartel USD Buy",
+                    "state": "44.7",
+                    "unit": "UAH",
+                },
+            ],
+        }
+
+    ha.execute = usd_ok  # type: ignore[method-assign]
+    reg.register(ha)
+    agent = Agent(_settings(tmp_path), memory, ollama, reg)
+    result = await agent.handle(1, "курс доллара")
+    assert "44.7" in result.text
     ollama.chat.assert_not_called()

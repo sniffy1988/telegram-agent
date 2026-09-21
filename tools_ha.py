@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from ha_topics import TOPIC_KEYWORDS, resolve_tool_topic
+
 logger = logging.getLogger(__name__)
 
 # Not room air — outdoor, forecast, or device/hardware probes.
@@ -84,6 +86,25 @@ def _is_indoor_temperature_state(st: dict[str, Any]) -> bool:
     return any(h in blob for h in indoor_hints) or "indoor" in eid
 
 
+def _is_air_quality_state(st: dict[str, Any]) -> bool:
+    eid = str(st.get("entity_id", "")).lower()
+    attrs = st.get("attributes") or {}
+    fname = str(attrs.get("friendly_name", "")).lower()
+    blob = f"{eid} {fname}"
+    dc = str(attrs.get("device_class") or "").lower()
+    if dc in ("pm25", "pm10", "aqi", "humidity"):
+        return True
+    if any(x in blob for x in ("pm2", "pm10", "aqi", "humidity", "saveecobot_outdoor_humidity")):
+        return True
+    if "open_meteo" in eid and any(
+        x in eid for x in ("pm2", "pm10", "european_aqi", "relative_humidity")
+    ):
+        return True
+    if "zhimi" in eid and ("pm25" in eid or "relative_humidity" in eid):
+        return True
+    return False
+
+
 def _is_pollen_state(st: dict[str, Any]) -> bool:
     eid = str(st.get("entity_id", "")).lower()
     attrs = st.get("attributes") or {}
@@ -131,7 +152,7 @@ class HomeAssistantTool:
     name = "ha_query"
     description = (
         "Read current Home Assistant entity states (read-only, all domains). "
-        "Topics: all, weather, indoor, pollen, fuel, usd, eur; or entity id / name fragment."
+        "Topics: all, weather, indoor, air, pollen, fuel, usd, eur; or entity id / name fragment."
     )
     input_schema = {
         "type": "object",
@@ -140,7 +161,7 @@ class HomeAssistantTool:
                 "type": "string",
                 "description": (
                     "Entity id, friendly name fragment, or topic: "
-                    "all, weather, indoor, pollen, fuel, usd, eur"
+                    "all, weather, indoor, air, pollen, fuel, usd, eur"
                 ),
             }
         },
@@ -209,60 +230,8 @@ class HomeAssistantTool:
             filtered.append(st)
 
         q_lower = query.lower()
-        topic_keywords = {
-            "indoor": (
-                "indoor",
-                "inside",
-                "комнат",
-                "помещен",
-                "в доме",
-                "в квартире",
-                "внутри",
-                "bedroom",
-                "living",
-                "kitchen",
-            ),
-            "pollen": (
-                "pollen",
-                "ragweed",
-                "ambrosia",
-                "амброз",
-                "пыльц",
-                "silam",
-                "mugwort",
-                "полин",
-            ),
-            "weather": (
-                "weather",
-                "open_meteo",
-                "temperature",
-                "temperatur",
-                "погод",
-                "температур",
-                "градус",
-            ),
-            "fuel": ("fuel", "ukr_fuel", "азс", "бензин", "дизел", "socar", "wog", "okko"),
-            "usd": ("usd", "dollar", "долар", "cartel", "obmenka"),
-            "eur": ("eur", "euro", "євро", "eur/usd"),
-            "all": (
-                "all",
-                "все датчик",
-                "все sensor",
-                "все сущност",
-                "список датчик",
-                "какие датчик",
-                "перечисли датчик",
-                "all sensor",
-                "everything in ha",
-            ),
-        }
-        topic: str | None = None
-        topic_order = ("all", "indoor", "pollen", "weather", "fuel", "usd", "eur")
-        for t in topic_order:
-            kws = topic_keywords[t]
-            if q_lower == t or any(k in q_lower for k in kws):
-                topic = t
-                break
+        topic = resolve_tool_topic(query)
+        topic_keywords = TOPIC_KEYWORDS
 
         use_minimal = topic == "all"
         matches: list[dict[str, Any]] = []
@@ -277,6 +246,8 @@ class HomeAssistantTool:
             elif topic == "indoor" and _is_indoor_temperature_state(st):
                 matches.append(compact(st))
             elif topic == "pollen" and _is_pollen_state(st):
+                matches.append(compact(st))
+            elif topic == "air" and _is_air_quality_state(st):
                 matches.append(compact(st))
             elif topic == "weather" and (
                 (eid.startswith("weather.") and "pollen" not in eid)

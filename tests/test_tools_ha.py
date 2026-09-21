@@ -197,3 +197,40 @@ async def test_pollen_topic_ragweed_and_silam() -> None:
     assert "sensor.silam_pollen_home_ragweed" in ids
     assert "weather.silam_pollen_home_forecast" in ids
     assert "sensor.open_meteo_temperature" not in ids
+
+
+@pytest.mark.asyncio
+async def test_air_topic_pm25() -> None:
+    states = [
+        {
+            "entity_id": "sensor.saveecobot_pm2_5",
+            "state": "13.2",
+            "attributes": {
+                "friendly_name": "SaveEcoBot PM2.5",
+                "device_class": "pm25",
+            },
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "sensor.open_meteo_temperature",
+            "state": "23",
+            "attributes": {"friendly_name": "Temp", "device_class": "temperature"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = states
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("tools_ha.httpx.AsyncClient", return_value=mock_client):
+        tool = HomeAssistantTool("http://ha.test", "token")
+        result = await tool.execute({"query": "air"}, {})
+
+    assert result["ok"] is True
+    ids = {s["entity_id"] for s in result["states"]}
+    assert "sensor.saveecobot_pm2_5" in ids
+    assert "sensor.open_meteo_temperature" not in ids

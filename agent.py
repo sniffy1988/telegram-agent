@@ -16,7 +16,9 @@ from ollama_client import (
     OllamaTimeoutError,
     OllamaUnavailableError,
 )
-from router import RoutedToolCall, is_ha_factual_query, route_tools
+from ha_replies import format_ha_reply
+from ha_topics import FACTUAL_REPLY_TOPICS
+from router import RoutedToolCall, route_tools_with_context
 from tools import ToolRegistry
 from telegram_utils import StatusStage
 
@@ -126,56 +128,51 @@ def _ha_failure_message(user_text: str, error: str | None = None) -> str:
     return "Не смог получить запрошенные данные из Home Assistant."
 
 
-def _routed_ha_query_topic(routed: list[RoutedToolCall]) -> str | None:
-    for call in routed:
-        if call.name == "ha_query":
-            q = call.arguments.get("query")
-            if isinstance(q, str) and q.strip():
-                return q.strip().lower()
-    return None
+def _ha_topics(tool_results: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw = tool_results.get("ha_topics")
+    if isinstance(raw, dict):
+        return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+    return {}
 
 
-def _format_ha_pollen_reply(payload: dict[str, Any]) -> str:
-    states = payload.get("states")
-    if not isinstance(states, list) or not states:
-        return "Нет данных по пыльце в Home Assistant."
-    lines = ["Пыльца (Home Assistant):", ""]
-    for st in states:
-        if not isinstance(st, dict):
-            continue
-        name = str(st.get("friendly_name") or st.get("entity_id") or "?")
-        val = st.get("state")
-        unit = st.get("unit")
-        suffix = f" {unit}" if unit else ""
-        lines.append(f"• {name}: {val}{suffix}")
-    lines.extend(
-        [
-            "",
-            "В HA ragweed = амброзия (не путать с полынью/mugwort — смотрите имя датчика).",
-            "Используйте только эти значения; 0 — низкий уровень, не «датчика нет».",
-        ]
-    )
-    return "\n".join(lines)
+def _record_tool_result(
+    tool_results: dict[str, Any], call: RoutedToolCall, payload: dict[str, Any]
+) -> None:
+    if call.name == "ha_query":
+        q = str(call.arguments.get("query", "")).strip().lower() or "query"
+        tool_results.setdefault("ha_topics", {})[q] = payload
+        tool_results["ha_query"] = payload
+    else:
+        tool_results[call.name] = payload
 
 
-def _should_short_circuit_ha_pollen_success(
-    routed: list[RoutedToolCall], tool_results: dict[str, dict[str, Any]]
+def _format_ha_topics_reply(ha_topics: dict[str, dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for topic in sorted(ha_topics.keys()):
+        parts.append(format_ha_reply(topic, ha_topics[topic]))
+    return "\n\n".join(parts)
+
+
+def _should_short_circuit_ha_success(
+    tool_results: dict[str, Any],
 ) -> bool:
-    if _routed_ha_query_topic(routed) != "pollen":
+    ha_topics = _ha_topics(tool_results)
+    if not ha_topics:
         return False
-    ha = tool_results.get("ha_query")
-    return isinstance(ha, dict) and bool(ha.get("ok"))
+    if any(not p.get("ok") for p in ha_topics.values()):
+        return False
+    return all(t in FACTUAL_REPLY_TOPICS for t in ha_topics.keys())
 
 
 def _should_short_circuit_ha_failure(
     text: str, tool_results: dict[str, dict[str, Any]]
 ) -> bool:
-    if "ha_query" not in tool_results:
-        return False
-    if tool_results["ha_query"].get("ok"):
-        return False
-    # HA was queried and failed — never let the LLM invent weather/FX/fuel values.
-    return True
+    ha_topics = _ha_topics(tool_results)
+    if not ha_topics:
+        if "ha_query" not in tool_results:
+            return False
+        return not tool_results["ha_query"].get("ok")
+    return any(not p.get("ok") for p in ha_topics.values())
 
 
 def _tool_results_for_prompt(tool_results: dict[str, Any], max_chars: int) -> str:
@@ -265,7 +262,9 @@ class Agent:
         history = get_history(chat_id)
         text_for_routing = (user_text or caption).strip()
 
-        routed = route_tools(text_for_routing, has_photo=has_photo)
+        routed = route_tools_with_context(
+            text_for_routing, has_photo=has_photo, history=history
+        )
         if routed:
             logger.info(
                 "[agent] routed tools: %s",
@@ -289,7 +288,7 @@ class Agent:
                     continue
                 await status(stage_for_tool_name(call.name))
                 payload = await tool.execute(call.arguments, context)
-                tool_results[call.name] = payload
+                _record_tool_result(tool_results, call, payload)
                 used_tools.append(call.name)
                 photos.extend(_collect_photos(call.name, payload))
                 logger.info(
@@ -314,9 +313,13 @@ class Agent:
             )
             return AgentResult(text=msg, photos=photos, used_tools=used_tools)
 
-        if _should_short_circuit_ha_pollen_success(routed, tool_results):
-            msg = _format_ha_pollen_reply(tool_results["ha_query"])
-            logger.info("[agent] HA pollen ok, short-circuit factual reply")
+        if _should_short_circuit_ha_success(tool_results):
+            ha_topics = _ha_topics(tool_results)
+            msg = _format_ha_topics_reply(ha_topics)
+            logger.info(
+                "[agent] HA %s ok, short-circuit factual reply",
+                sorted(ha_topics.keys()),
+            )
             append_turn(
                 chat_id,
                 text_for_routing,
@@ -377,10 +380,26 @@ class Agent:
                             args = {}
                         await status(stage_for_tool_name(name))
                         payload = await tool.execute(args, context)
-                        tool_results[name] = payload
+                        if name == "ha_query":
+                            q = str(args.get("query", "")).strip().lower() or "query"
+                            fake = RoutedToolCall(name, {"query": q})
+                            _record_tool_result(tool_results, fake, payload)
+                        else:
+                            tool_results[name] = payload
                         used_tools.append(name)
                         photos.extend(_collect_photos(name, payload))
                     if tool_results:
+                        if _should_short_circuit_ha_success(tool_results):
+                            msg_text = _format_ha_topics_reply(_ha_topics(tool_results))
+                            append_turn(
+                                chat_id,
+                                text_for_routing,
+                                msg_text,
+                                max_messages=self.settings.max_history_messages,
+                            )
+                            return AgentResult(
+                                text=msg_text, photos=photos, used_tools=used_tools
+                            )
                         if _should_short_circuit_ha_failure(
                             text_for_routing, tool_results
                         ):

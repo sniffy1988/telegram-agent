@@ -113,6 +113,23 @@ docker compose -f docker-compose.yml -f docker-compose.colima.yml exec familyai 
 
 Bridge-only fallback: `colima stop && colima start --network-address` (then try bridge compose again).
 
+### Что спросить в Telegram (Home Assistant)
+
+Ответы по погоде, курсу, пыльце и т.д. формируются **напрямую из HA** (без выдумок модели).
+
+| Тема | Примеры |
+|------|---------|
+| Погода / улица | «какая температура», «яка погода» |
+| Комнаты | «а в комнатах?», «температура в доме» |
+| Воздух | «pm2.5», «влажность», «качество воздуха» |
+| Амброзия / пыльца | «амброзия», «ragweed», «пыльца silam» |
+| Курс | «курс доллара», «cartel», «євро» |
+| АЗС | «дизель socar», «цена на азс» |
+| Всё read-only | «все сущности в HA», `sensor.cartel_usd_buy` |
+| Уточнение | после вопроса о погоде: «а сейчас?» (контекст чата) |
+
+Команды: `/chatid` — ваш `chat_id` для `TELEGRAM_ALLOWED_CHAT_IDS`; `/clear`, `/memory`.
+
 ## Native (no Docker)
 
 ```bash
