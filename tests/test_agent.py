@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from agent import Agent
+from config import Settings
+from memory import MemoryStore
+from tools import ToolRegistry
+from tools_ha import HomeAssistantTool
+
+
+def _settings(tmp_path) -> Settings:
+    return Settings(
+        telegram_bot_token="x",
+        telegram_allowed_chat_ids=frozenset(),
+        ollama_url="http://127.0.0.1:11434",
+        ollama_model="test",
+        ollama_timeout=30.0,
+        max_history_messages=6,
+        memory_path=tmp_path / "m.json",
+        home_assistant_url="http://ha",
+        home_assistant_token="t",
+        max_search_results=3,
+        max_images=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ha_failure_short_circuit_no_invented_rate(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    ollama.chat = AsyncMock(return_value={"content": "41.5 UAH"})
+    reg = ToolRegistry()
+    ha = HomeAssistantTool("http://ha", "t")
+
+    async def fail_ha(arguments, context):
+        return {"ok": False, "error": "home_assistant_unreachable", "states": []}
+
+    ha.execute = fail_ha  # type: ignore[method-assign]
+    reg.register(ha)
+    agent = Agent(_settings(tmp_path), memory, ollama, reg)
+
+    result = await agent.handle(1, "какой сейчас курс доллара?")
+    assert "Home Assistant" in result.text
+    assert "41" not in result.text
+    ollama.chat.assert_not_called()
