@@ -22,6 +22,8 @@ from memory import MemoryStore
 from ollama_client import OllamaClient, _model_lock
 from telegram_utils import (
     StatusStage,
+    finalize_status_reply,
+    reply_send_kwargs,
     safe_edit_status,
     send_typing,
     send_upload_photo,
@@ -160,10 +162,14 @@ async def _process_message(
         return
 
     chat_id = update.effective_chat.id
-    reply_to = update.effective_message.message_id
+    user_message = update.effective_message
     logger.info("[telegram] chat_id=%s received message", chat_id)
 
-    status_msg = await update.effective_message.reply_text(StatusStage.GENERATING.value)
+    status_msg = await user_message.get_bot().send_message(
+        chat_id=user_message.chat_id,
+        text=StatusStage.GENERATING.value,
+        **reply_send_kwargs(user_message),
+    )
 
     async def on_status(stage: StatusStage) -> None:
         if stage == StatusStage.QUEUED:
@@ -205,22 +211,26 @@ async def _process_message(
         )
 
         chunks = split_message(result.text)
-        await safe_edit_status(status_msg, chunks[0])
+        await finalize_status_reply(status_msg, user_message, chunks[0])
+        bot = user_message.get_bot()
         for extra in chunks[1:]:
-            await update.effective_chat.send_message(
-                extra, reply_to_message_id=reply_to
+            await bot.send_message(
+                chat_id=user_message.chat_id,
+                text=extra,
+                **reply_send_kwargs(user_message),
             )
 
         for photo in result.photos[: settings.max_images]:
             data = await download_image(photo.image_url)
             if not data:
                 continue
-            await send_upload_photo(update.effective_message)
+            await send_upload_photo(user_message)
             cap = photo.caption[:1024] if photo.caption else None
-            await update.effective_chat.send_photo(
+            await bot.send_photo(
+                chat_id=user_message.chat_id,
                 photo=data,
                 caption=cap,
-                reply_to_message_id=reply_to,
+                **reply_send_kwargs(user_message),
             )
 
         logger.info(
@@ -231,8 +241,10 @@ async def _process_message(
         )
     except Exception:
         logger.exception("Unhandled error processing message")
-        await safe_edit_status(
-            status_msg, "Произошла ошибка при обработке сообщения."
+        await finalize_status_reply(
+            status_msg,
+            user_message,
+            "Произошла ошибка при обработке сообщения.",
         )
     finally:
         if typing_task:

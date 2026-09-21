@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from enum import Enum
 
-from telegram import Message
+from telegram import Message, ReplyParameters
 from telegram.constants import ChatAction
 from telegram.error import BadRequest
 
@@ -40,11 +40,42 @@ def split_message(text: str, limit: int = TELEGRAM_MAX_MESSAGE) -> list[str]:
     return chunks
 
 
-async def safe_edit_status(message: Message, text: str) -> None:
+def reply_send_kwargs(user_message: Message) -> dict:
+    """Thread bot sends as replies to the user's message (works in topics too)."""
+    kwargs: dict = {
+        "reply_parameters": ReplyParameters(
+            message_id=user_message.message_id,
+            chat_id=user_message.chat_id,
+        ),
+    }
+    if user_message.message_thread_id is not None:
+        kwargs["message_thread_id"] = user_message.message_thread_id
+    return kwargs
+
+
+async def safe_edit_status(message: Message, text: str) -> bool:
     try:
         await message.edit_text(text)
+        return True
     except BadRequest as exc:
-        logger.debug("Could not edit status message: %s", exc)
+        logger.warning("Could not edit status message: %s", exc)
+        return False
+
+
+async def finalize_status_reply(
+    status_msg: Message,
+    user_message: Message,
+    text: str,
+) -> None:
+    """Replace status placeholder with the answer; fall back to a new reply if edit fails."""
+    if await safe_edit_status(status_msg, text):
+        return
+    bot = user_message.get_bot()
+    await bot.send_message(
+        chat_id=user_message.chat_id,
+        text=text,
+        **reply_send_kwargs(user_message),
+    )
 
 
 async def send_typing(message: Message) -> None:
