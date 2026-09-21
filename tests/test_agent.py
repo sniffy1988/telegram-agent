@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +14,18 @@ from tools_ha import HomeAssistantTool
 from tools_ha_control import HomeAssistantControlTool
 
 
-def _settings(tmp_path, *, ha_control_enabled: bool = False) -> Settings:
+def _settings(
+    tmp_path,
+    *,
+    ha_control_enabled: bool = False,
+    catalog_path: Path | None = None,
+) -> Settings:
+    if catalog_path is None:
+        catalog_path = tmp_path / "test_catalog.json"
+        catalog_path.write_text(
+            '{"allowlist":["light.nochik"],"aliases":{"ночник":"light.nochik"}}',
+            encoding="utf-8",
+        )
     return Settings(
         telegram_bot_token="x",
         telegram_allowed_chat_ids=frozenset(),
@@ -30,7 +42,8 @@ def _settings(tmp_path, *, ha_control_enabled: bool = False) -> Settings:
         ha_topic_match_limit=25,
         ha_tool_json_max_chars=14000,
         ha_control_enabled=ha_control_enabled,
-        ha_control_domains=frozenset({"switch"}),
+        ha_control_domains=frozenset({"switch", "light"}),
+        ha_control_catalog_path=catalog_path,
     )
 
 
@@ -192,7 +205,13 @@ async def test_ha_control_prepare_returns_pending(tmp_path) -> None:
         }
     )
     reg = ToolRegistry()
-    reg.register(HomeAssistantTool("http://ha", "t"))
+    ha = HomeAssistantTool("http://ha", "t")
+
+    async def ha_no_route(arguments, context):
+        return {"ok": False, "error": "no_matching_entities", "states": []}
+
+    ha.execute = ha_no_route  # type: ignore[method-assign]
+    reg.register(ha)
     ctrl = HomeAssistantControlClient(
         "http://ha",
         "t",
@@ -212,7 +231,71 @@ async def test_ha_control_prepare_returns_pending(tmp_path) -> None:
     ctrl_tool.execute = prepare_ok  # type: ignore[method-assign]
     reg.register(ctrl_tool)
     agent = Agent(_settings(tmp_path, ha_control_enabled=True), memory, ollama, reg)
-    result = await agent.handle(1, "выключи лампу в спальне")
+    result = await agent.handle(1, "нужно выключить лампу в спальне")
     assert result.pending_ha_control == pending
     assert "Lamp" in result.text
     assert "Да" in result.text or "«Да»" in result.text
+
+
+@pytest.mark.asyncio
+async def test_control_intent_disabled_short_circuit(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    ollama.chat = AsyncMock(return_value={"content": "I cannot control devices"})
+    reg = ToolRegistry()
+    reg.register(HomeAssistantTool("http://ha", "t"))
+    agent = Agent(_settings(tmp_path, ha_control_enabled=False), memory, ollama, reg)
+    result = await agent.handle(1, "включи ночник")
+    assert "HA_CONTROL_ENABLED" in result.text
+    ollama.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_control_intent_finds_device_and_pending(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    reg = ToolRegistry()
+    ha = HomeAssistantTool("http://ha", "t")
+
+    async def ha_search(arguments, context):
+        q = str(arguments.get("query", ""))
+        if q == "light.nochik":
+            return {
+                "ok": True,
+                "states": [
+                    {
+                        "entity_id": "light.nochik",
+                        "friendly_name": "Ночник",
+                        "state": "off",
+                        "unit": None,
+                    }
+                ],
+            }
+        return {"ok": False, "error": "no_matching_entities", "states": []}
+
+    ha.execute = ha_search  # type: ignore[method-assign]
+    reg.register(ha)
+    ctrl = HomeAssistantControlClient(
+        "http://ha",
+        "t",
+        allowed_domains=frozenset({"light", "switch"}),
+    )
+    ctrl_tool = HomeAssistantControlTool(ctrl)
+    pending = PendingHaControl(
+        entity_id="light.nochik",
+        domain="light",
+        service="turn_on",
+        friendly_name="Ночник",
+    )
+
+    async def prepare_ok(arguments, context):
+        return {"ok": True, "pending": pending}
+
+    ctrl_tool.execute = prepare_ok  # type: ignore[method-assign]
+    reg.register(ctrl_tool)
+    agent = Agent(_settings(tmp_path, ha_control_enabled=True), memory, ollama, reg)
+    result = await agent.handle(1, "включи ночник")
+
+    assert result.pending_ha_control is not None
+    assert "Ночник" in result.text
+    ollama.chat.assert_not_called()

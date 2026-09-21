@@ -1,0 +1,43 @@
+{
+  "comment": "Family HA — управление через Telegram. Правьте aliases под свои названия.",
+  "allowlist": [
+    "switch.rozumnii_peremikach_2",
+    "switch.rozumnii_peremikach_2_2",
+    "switch.lumi_v1_a9c1_switch",
+    "light.lumi_v3_7fa7_light",
+    "humidifier.deerma_jsq2w_a08e_humidifier",
+    "fan.zhimi_mc2_8c38_air_purifier",
+    "vacuum.roborock_s7"
+  ],
+  "aliases": {
+    "ночник": "switch.rozumnii_peremikach_2",
+    "ночник 2": "switch.rozumnii_peremikach_2_2",
+    "перемикач": "switch.rozumnii_peremikach_2",
+    "перемикач 2": "switch.rozumnii_peremikach_2_2",
+    "розумний перемикач": "switch.rozumnii_peremikach_2",
+    "розетка": "switch.lumi_v1_a9c1_switch",
+    "розетка xiaomi": "switch.lumi_v1_a9c1_switch",
+    "увлажнитель": "humidifier.deerma_jsq2w_a08e_humidifier",
+    "увлажнитель 2": "humidifier.deerma_jsq2w_a08e_humidifier",
+    "deerma": "humidifier.deerma_jsq2w_a08e_humidifier",
+    "очиститель": "fan.zhimi_mc2_8c38_air_purifier",
+    "очиститель воздуха": "fan.zhimi_mc2_8c38_air_purifier",
+    "воздух": "fan.zhimi_mc2_8c38_air_purifier",
+    "zhimi": "fan.zhimi_mc2_8c38_air_purifier",
+    "пылесос": "vacuum.roborock_s7",
+    "roborock": "vacuum.roborock_s7",
+    "s7": "vacuum.roborock_s7",
+    "gateway": "light.lumi_v3_7fa7_light",
+    "свет шлюз": "light.lumi_v3_7fa7_light",
+    "шлюз": "light.lumi_v3_7fa7_light"
+  },
+  "labels": {
+    "switch.rozumnii_peremikach_2": "Розумний перемикач 2 (ночник?)",
+    "switch.rozumnii_peremikach_2_2": "Розумний перемикач 2 — канал 2",
+    "switch.lumi_v1_a9c1_switch": "Xiaomi розетка",
+    "light.lumi_v3_7fa7_light": "Aqara Gateway — свет",
+    "humidifier.deerma_jsq2w_a08e_humidifier": "Xiaomi Humidifier 2",
+    "fan.zhimi_mc2_8c38_air_purifier": "Mi Air Purifier 2H",
+    "vacuum.roborock_s7": "Roborock S7"
+  }
+}

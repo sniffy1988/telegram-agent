@@ -172,6 +172,41 @@ def message_mentions_fuel(text: str) -> bool:
     return bool(FUEL_ROUTE.search(text.strip().lower()))
 
 
+DIESEL_PRODUCT_HINT = re.compile(
+    r"\b(дп|dp|дизел\w*|diesel|соляр\w*)\b|nano\s*дп",
+    re.I,
+)
+LPG_PRODUCT_HINT = re.compile(r"\b(газ|lpg|пропан|propane)\b", re.I)
+PETROL_PRODUCT_HINT = re.compile(
+    r"\b(бензин\w*|petrol|gasoline|benzin\w*|а[\s-]?9[258])\b",
+    re.I,
+)
+
+
+def fuel_kinds_from_text(text: str) -> frozenset[str] | None:
+    """Which fuel products the user asked about (None = all prices)."""
+    lower = text.strip().lower()
+    kinds: set[str] = set()
+    if DIESEL_PRODUCT_HINT.search(lower):
+        kinds.add("diesel")
+    if LPG_PRODUCT_HINT.search(lower):
+        kinds.add("lpg")
+    if PETROL_PRODUCT_HINT.search(lower):
+        kinds.add("petrol")
+    return frozenset(kinds) if kinds else None
+
+
+def fuel_product_kind(friendly_name: str, entity_id: str) -> str:
+    blob = f"{entity_id} {friendly_name}".lower()
+    if re.search(r"дп|diesel|дизel|соляр|\bnano\b", blob):
+        return "diesel"
+    if re.search(r"а[\s-]?9[258]|бенз|petrol|gasoline|octane", blob):
+        return "petrol"
+    if re.search(r"(?<!\w)газ(?!\w)|lpg|пропан|propane", blob):
+        return "lpg"
+    return "other"
+
+
 def message_expects_ha_facts(text: str) -> bool:
     return bool(HA_FACTUAL_PATTERNS.search(text.strip()))
 

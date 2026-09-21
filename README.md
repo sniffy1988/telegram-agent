@@ -136,9 +136,11 @@ Bridge-only fallback: `colima stop && colima start --network-address` (then try 
 2. В `.env`: **`HA_CONTROL_ENABLED=1`** (при необходимости **`HA_CONTROL_DOMAINS=...`**).
 3. Перезапустите контейнер.
 
-Фразы вроде «выключи switch.rozumnii_peremikach_2» или «включи свет на кухне» — модель сначала может вызвать `ha_query`, затем `ha_control`. Перед выполнением в Telegram появятся кнопки **Да** / **Нет**; без «Да» команда в HA не уходит.
+Фразы: «**включи ночник**», «выключи увлажнитель», «запусти пылесос» — см. **`/devices`**. Каталог имён: [`deploy/ha_control_catalog.json`](deploy/ha_control_catalog.json) (aliases + allowlist; без AdGuard/MikroTik/Delta Pro).
 
-Команды: `/chatid` — ваш `chat_id` для `TELEGRAM_ALLOWED_CHAT_IDS`; `/clear`, `/memory`.
+Перед выполнением — кнопки **Да** / **Нет** в Telegram.
+
+Команды: `/chatid`, `/devices`, `/clear`, `/memory`.
 
 ## Native (no Docker)
 

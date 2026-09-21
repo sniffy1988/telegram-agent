@@ -300,3 +300,51 @@ async def test_air_topic_pm25() -> None:
     ids = {s["entity_id"] for s in result["states"]}
     assert "sensor.saveecobot_pm2_5" in ids
     assert "sensor.open_meteo_temperature" not in ids
+
+
+@pytest.mark.asyncio
+async def test_fuel_excludes_update_switch_and_filters_diesel() -> None:
+    states = [
+        {
+            "entity_id": "sensor.ukr_fuel_socar_dp_plus",
+            "state": "104.0",
+            "attributes": {
+                "friendly_name": "SOCAR ДП+",
+                "unit_of_measurement": "грн/л",
+            },
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "sensor.ukr_fuel_socar_gas",
+            "state": "45.5",
+            "attributes": {
+                "friendly_name": "SOCAR Газ",
+                "unit_of_measurement": "грн/л",
+            },
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "switch.ukr_fuel_prices_update",
+            "state": "off",
+            "attributes": {"friendly_name": "Ukrainian Fuel Prices Update"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = states
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("tools_ha.httpx.AsyncClient", return_value=mock_client):
+        tool = HomeAssistantTool("http://ha.test", "token")
+        result = await tool.execute(
+            {"query": "fuel"},
+            {"user_text": "а сколько стоит ДП?"},
+        )
+
+    assert result["ok"] is True
+    names = [s["friendly_name"] for s in result["states"]]
+    assert names == ["SOCAR ДП+"]

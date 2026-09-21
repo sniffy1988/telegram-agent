@@ -10,6 +10,7 @@ load_dotenv()
 
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_MEMORY_PATH = ROOT_DIR / "memory.json"
+DEFAULT_HA_CONTROL_CATALOG = ROOT_DIR / "deploy" / "ha_control_catalog.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class Settings:
     ha_tool_json_max_chars: int
     ha_control_enabled: bool
     ha_control_domains: frozenset[str]
+    ha_control_catalog_path: Path
 
 
 def _parse_chat_ids(raw: str) -> frozenset[int]:
@@ -114,4 +116,15 @@ def load_settings() -> Settings:
                 {"light", "switch", "fan", "humidifier", "vacuum", "input_boolean"}
             ),
         ),
+        ha_control_catalog_path=_catalog_path_env(),
     )
+
+
+def _catalog_path_env() -> Path:
+    raw = os.getenv("HA_CONTROL_CATALOG_PATH", "").strip()
+    if not raw:
+        return DEFAULT_HA_CONTROL_CATALOG
+    path = Path(raw)
+    if not path.is_absolute():
+        path = ROOT_DIR / path
+    return path

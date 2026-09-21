@@ -33,6 +33,7 @@ from telegram_utils import (
 )
 from tools import ToolRegistry
 from ha_control import HomeAssistantControlClient
+from ha_control_catalog import format_devices_help
 from tools_ha import HomeAssistantTool
 from tools_ha_control import HomeAssistantControlTool
 from tools_image import ReverseImageTool
@@ -127,6 +128,22 @@ async def memory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     memory: MemoryStore = context.bot_data["memory"]
     summary = memory.format_summary(update.effective_chat.id)
     await update.effective_message.reply_text(summary)
+
+
+async def devices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message:
+        return
+    if not _allowed_chat(update, context.bot_data["allowed_chat_ids"]):
+        return
+    settings = context.bot_data["settings"]
+    if not settings.ha_control_enabled:
+        await update.effective_message.reply_text(
+            "Управление выключено. В .env: HA_CONTROL_ENABLED=1 и перезапуск."
+        )
+        return
+    await update.effective_message.reply_text(
+        format_devices_help(settings.ha_control_catalog_path)
+    )
 
 
 async def forget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -470,6 +487,7 @@ def main() -> None:
     app.add_handler(CommandHandler("clear", clear_cmd))
     app.add_handler(CommandHandler("memory", memory_cmd))
     app.add_handler(CommandHandler("forget", forget_cmd))
+    app.add_handler(CommandHandler("devices", devices_cmd))
     app.add_handler(CallbackQueryHandler(forget_callback, pattern=f"^{FORGET_CONFIRM_PREFIX}"))
     app.add_handler(
         CallbackQueryHandler(

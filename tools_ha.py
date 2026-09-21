@@ -10,6 +10,8 @@ from ha_topics import (
     TOPIC_KEYWORDS,
     entity_matches_eur,
     entity_matches_usd,
+    fuel_kinds_from_text,
+    fuel_product_kind,
     resolve_tool_topic,
 )
 
@@ -108,6 +110,82 @@ def _is_air_quality_state(st: dict[str, Any]) -> bool:
     if "zhimi" in eid and ("pm25" in eid or "relative_humidity" in eid):
         return True
     return False
+
+
+_FUEL_NON_PRICE_MARKERS = (
+    "prices update",
+    "price update",
+    "fuel prices update",
+    "ukrainian fuel prices update",
+)
+
+_FUEL_BLOB_KEYWORDS = tuple(
+    k for k in TOPIC_KEYWORDS["fuel"] if k not in ("fuel", "ukr_fuel")
+)
+
+
+def _parse_numeric_state(state: Any) -> float | None:
+    if state is None:
+        return None
+    s = str(state).strip().replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _is_fuel_price_state(st: dict[str, Any]) -> bool:
+    eid = str(st.get("entity_id", "")).lower()
+    domain = _entity_domain(eid)
+    if domain in ("automation", "script", "scene", "update"):
+        return False
+    attrs = st.get("attributes") or {}
+    fname = str(attrs.get("friendly_name", "")).lower()
+    blob = f"{eid} {fname}"
+    if any(m in blob for m in _FUEL_NON_PRICE_MARKERS):
+        return False
+    if fname.endswith(" update") or eid.endswith("_update"):
+        return False
+    unit = str(
+        attrs.get("unit_of_measurement")
+        or attrs.get("native_unit_of_measurement")
+        or ""
+    ).lower()
+    if any(x in unit for x in ("грн", "uah", "₴", "/l", "л")):
+        return True
+    if _parse_numeric_state(st.get("state")) is not None:
+        return True
+    if domain == "switch" and str(st.get("state", "")).lower() in ("on", "off"):
+        return False
+    return False
+
+
+def _is_fuel_entity_candidate(st: dict[str, Any]) -> bool:
+    eid = str(st.get("entity_id", "")).lower()
+    attrs = st.get("attributes") or {}
+    fname = str(attrs.get("friendly_name", "")).lower()
+    blob = f"{eid} {fname}"
+    if "ukr_fuel" in eid or "ukr_fuel" in blob:
+        return True
+    if any(k in blob for k in _FUEL_BLOB_KEYWORDS):
+        return True
+    return "fuel" in eid and "update" not in eid
+
+
+def _filter_fuel_matches(
+    matches: list[dict[str, Any]], user_text: str
+) -> list[dict[str, Any]]:
+    kinds = fuel_kinds_from_text(user_text)
+    if not kinds:
+        return matches
+    filtered: list[dict[str, Any]] = []
+    for m in matches:
+        name = str(m.get("friendly_name") or m.get("n") or "")
+        eid = str(m.get("entity_id") or m.get("id") or "")
+        kind = fuel_product_kind(name, eid)
+        if kind in kinds:
+            filtered.append(m)
+    return filtered if filtered else matches
 
 
 def _is_pollen_state(st: dict[str, Any]) -> bool:
@@ -274,9 +352,7 @@ class HomeAssistantTool:
                 )
             ):
                 matches.append(compact(st))
-            elif topic == "fuel" and (
-                "fuel" in eid or "ukr_fuel" in eid or any(x in blob for x in topic_keywords["fuel"])
-            ):
+            elif topic == "fuel" and _is_fuel_entity_candidate(st) and _is_fuel_price_state(st):
                 matches.append(compact(st))
             elif topic == "usd" and entity_matches_usd(str(eid)):
                 matches.append(compact(st))
@@ -328,6 +404,10 @@ class HomeAssistantTool:
                 len(filtered),
             )
             return {"ok": False, "error": "no_matching_entities", "states": []}
+
+        if topic == "fuel":
+            user_text = str(context.get("user_text") or context.get("caption") or "")
+            matches = _filter_fuel_matches(matches, user_text)
 
         matches.sort(key=lambda m: str(m.get("entity_id") or m.get("id", "")))
         if topic == "all":
