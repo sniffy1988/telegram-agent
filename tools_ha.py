@@ -231,6 +231,8 @@ class HomeAssistantTool:
 
         q_lower = query.lower()
         topic = resolve_tool_topic(query)
+        if _is_allowed_entity(query.strip()):
+            topic = None
         topic_keywords = TOPIC_KEYWORDS
 
         use_minimal = topic == "all"
