@@ -17,6 +17,7 @@ from telegram.ext import (
 
 from agent import Agent
 from config import load_settings
+from healthcheck import log_startup_connectivity
 from logging_config import configure_logging
 from conversation import clear_history
 from memory import MemoryStore
@@ -330,6 +331,7 @@ def main() -> None:
 
     async def post_init(application: Application) -> None:
         await ollama.open()
+        await log_startup_connectivity(settings)
 
     async def post_shutdown(application: Application) -> None:
         await ollama.close()

@@ -26,9 +26,21 @@ if [[ ! -f .env ]]; then
   echo "Created .env from .env.example — set TELEGRAM_BOT_TOKEN before use."
 fi
 
+COMPOSE=(docker compose -f docker-compose.yml)
+# Default on Colima: host network so HA on LAN (10.10.x) and Ollama on Mac work.
+if [[ "${FAMILYAI_COLIMA_LAN:-1}" == "1" ]]; then
+  COMPOSE+=(-f docker-compose.colima.yml)
+  echo "Using docker-compose.colima.yml (host network, LAN HA)."
+  echo "Ollama on Mac: set OLLAMA_URL=http://host.lima.internal:11434 in .env"
+fi
+
 if grep -q '^OLLAMA_URL=http://127.0.0.1:11434' .env 2>/dev/null; then
   if [[ "${FAMILYAI_PATCH_OLLAMA:-1}" == "1" ]]; then
-    echo "Tip: in .env use OLLAMA_URL=http://host.docker.internal:11434 for Docker."
+    if [[ "${FAMILYAI_COLIMA_LAN:-1}" == "1" ]]; then
+      echo "Tip: in .env use OLLAMA_URL=http://host.lima.internal:11434 (Colima host network)."
+    else
+      echo "Tip: in .env use OLLAMA_URL=http://host.docker.internal:11434 for Docker bridge."
+    fi
   fi
 fi
 
@@ -37,18 +49,20 @@ export FAMILYAI_TAG="${FAMILYAI_TAG:-latest}"
 
 if [[ "${FAMILYAI_PULL:-1}" == "1" ]]; then
   echo "Pulling ${FAMILYAI_IMAGE}:${FAMILYAI_TAG} (set FAMILYAI_PULL=0 to build locally)..."
-  if docker compose pull; then
+  if "${COMPOSE[@]}" pull; then
     echo "Using image from registry."
   else
     echo "Pull failed — building locally..."
-    docker compose build
+    "${COMPOSE[@]}" build
   fi
 else
-  docker compose build
+  "${COMPOSE[@]}" build
 fi
 
-docker compose up -d
+"${COMPOSE[@]}" up -d
 
 echo ""
-echo "familyai is up. Logs: docker compose logs -f familyai"
-echo "Stop:    docker compose down"
+echo "familyai is up."
+echo "Logs:    docker compose -f docker-compose.yml -f docker-compose.colima.yml logs -f familyai"
+echo "Stop:    docker compose -f docker-compose.yml -f docker-compose.colima.yml down"
+echo "HA test: docker compose ... logs familyai 2>&1 | grep startup"

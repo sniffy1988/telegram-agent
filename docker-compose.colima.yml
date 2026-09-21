@@ -1,0 +1,10 @@
+# Colima/Mac: bridge networking often cannot reach LAN IPs (e.g. 10.10.30.x).
+# Host networking uses the Colima VM stack so Home Assistant on your LAN works.
+# Ollama on the Mac host: use host.lima.internal (not host.docker.internal).
+services:
+  familyai:
+    network_mode: host
+    # Base compose sets extra_hosts for bridge; incompatible with host network.
+    extra_hosts: []
+    environment:
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.lima.internal:11434}

@@ -91,7 +91,9 @@ def _ha_failure_message(user_text: str, error: str | None = None) -> str:
     if error == "home_assistant_unreachable":
         return (
             "Не удалось подключиться к Home Assistant. Проверьте HOME_ASSISTANT_URL "
-            "и доступ с сервера/контейнера до HA."
+            "и HOME_ASSISTANT_TOKEN, а также доступ с сервера/контейнера до HA. "
+            "На Mac с Colima: ./deploy/colima.sh (host network для LAN) и "
+            "OLLAMA_URL=http://host.lima.internal:11434 в .env."
         )
     if error == "no_matching_entities":
         lower = user_text.lower()
