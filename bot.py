@@ -33,7 +33,7 @@ from telegram_utils import (
 )
 from tools import ToolRegistry
 from ha_control import HomeAssistantControlClient
-from ha_control_catalog import format_devices_help
+from ha_control_catalog import catalog_allowlist, format_devices_help
 from tools_ha import HomeAssistantTool
 from tools_ha_control import HomeAssistantControlTool
 from tools_image import ReverseImageTool
@@ -452,6 +452,22 @@ def main() -> None:
             "[startup] HA_CONTROL_ENABLED but TELEGRAM_ALLOWED_CHAT_IDS is empty — "
             "restrict chat IDs before enabling control in production"
         )
+    if settings.ha_control_enabled:
+        cat_path = settings.ha_control_catalog_path
+        allow_n = len(catalog_allowlist(cat_path))
+        if allow_n:
+            logger.info(
+                "[startup] ha_control catalog=%s devices=%s",
+                cat_path,
+                allow_n,
+            )
+        elif cat_path.is_file():
+            logger.warning("[startup] ha_control catalog empty: %s", cat_path)
+        else:
+            logger.warning(
+                "[startup] ha_control catalog missing: %s (aliases disabled)",
+                cat_path,
+            )
     memory = MemoryStore(settings.memory_path)
     ollama = OllamaClient(
         settings.ollama_url, settings.ollama_model, settings.ollama_timeout
