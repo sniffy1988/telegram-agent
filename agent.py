@@ -16,6 +16,7 @@ from ollama_client import (
     OllamaTimeoutError,
     OllamaUnavailableError,
 )
+from ha_control import PendingHaControl
 from ha_replies import format_ha_reply
 from ha_topics import FACTUAL_REPLY_TOPICS, message_expects_ha_facts
 from router import RoutedToolCall, route_tools_with_context
@@ -75,13 +76,53 @@ class AgentResult:
     photos: list[PhotoAttachment] = field(default_factory=list)
     used_tools: list[str] = field(default_factory=list)
     skip_history: bool = False
+    pending_ha_control: PendingHaControl | None = None
 
 
-def _build_system_prompt(memory_block: str) -> str:
+HA_CONTROL_SYSTEM = """
+Home Assistant control (ha_control) is available for allowed domains only.
+Use ha_control only when the user clearly asks to turn on/off/toggle/start/stop a device.
+Always pass the exact entity_id from ha_query if unsure — never guess entity ids.
+Control actions require Telegram confirmation; tell the user to press Yes to apply.
+"""
+
+
+def _build_system_prompt(memory_block: str, *, ha_control_enabled: bool = False) -> str:
     parts = [FAMILYAI_SYSTEM.strip(), TOOL_AUTHORITY_RULES.strip()]
+    if ha_control_enabled:
+        parts.append(HA_CONTROL_SYSTEM.strip())
     if memory_block:
         parts.append(memory_block.strip())
     return "\n\n".join(parts)
+
+
+def _control_confirm_message(pending: PendingHaControl) -> str:
+    labels = {
+        "turn_on": "Включить",
+        "turn_off": "Выключить",
+        "toggle": "Переключить",
+        "start": "Запустить",
+        "stop": "Остановить",
+        "pause": "Пауза",
+        "return_to_base": "На базу",
+    }
+    verb = labels.get(pending.service, pending.service)
+    return (
+        f"{verb} «{pending.friendly_name}» ({pending.entity_id})?\n"
+        "Нажмите «Да» для выполнения или «Нет» для отмены."
+    )
+
+
+def _control_error_message(error: str | None) -> str:
+    if error == "domain_not_allowed":
+        return "Это устройство нельзя управлять через бота (домен не в allowlist)."
+    if error == "action_not_allowed":
+        return "Это действие не разрешено для данного типа устройства."
+    if error == "entity_not_found":
+        return "Сущность не найдена в Home Assistant."
+    if error == "home_assistant_not_configured":
+        return "Home Assistant не настроен (токен)."
+    return "Не удалось подготовить управление Home Assistant."
 
 
 def _ha_failure_message(user_text: str, error: str | None = None) -> str:
@@ -123,7 +164,24 @@ def _ha_failure_message(user_text: str, error: str | None = None) -> str:
         return "Не смог получить температуру из Home Assistant."
     if any(w in lower for w in ("погод", "weather")):
         return "Не смог получить погоду из Home Assistant."
-    if any(w in lower for w in ("бензин", "fuel", "азс", "палив")):
+    if any(
+        w in lower
+        for w in (
+            "бензин",
+            "дизел",
+            "дизель",
+            "соляр",
+            "соляра",
+            "дп",
+            "diesel",
+            "fuel",
+            "азс",
+            "палив",
+            "socar",
+            "wog",
+            "okko",
+        )
+    ):
         return "Не смог получить цены на топливо из Home Assistant."
     return "Не смог получить запрошенные данные из Home Assistant."
 
@@ -258,7 +316,9 @@ class Agent:
             self.memory.save()
 
         memory_block = self.memory.format_injection(chat_id)
-        system = _build_system_prompt(memory_block)
+        system = _build_system_prompt(
+            memory_block, ha_control_enabled=self.settings.ha_control_enabled
+        )
         history = get_history(chat_id)
         text_for_routing = (user_text or caption).strip()
 
@@ -401,6 +461,35 @@ class Agent:
                             args = {}
                         await status(stage_for_tool_name(name))
                         payload = await tool.execute(args, context)
+                        if name == "ha_control":
+                            if payload.get("ok") and payload.get("pending"):
+                                pending = payload["pending"]
+                                msg_text = _control_confirm_message(pending)
+                                append_turn(
+                                    chat_id,
+                                    text_for_routing,
+                                    msg_text,
+                                    max_messages=self.settings.max_history_messages,
+                                )
+                                return AgentResult(
+                                    text=msg_text,
+                                    photos=photos,
+                                    used_tools=used_tools,
+                                    pending_ha_control=pending,
+                                )
+                            err = payload.get("error")
+                            msg_text = _control_error_message(
+                                err if isinstance(err, str) else None
+                            )
+                            append_turn(
+                                chat_id,
+                                text_for_routing,
+                                msg_text,
+                                max_messages=self.settings.max_history_messages,
+                            )
+                            return AgentResult(
+                                text=msg_text, photos=photos, used_tools=used_tools
+                            )
                         if name == "ha_query":
                             q = str(args.get("query", "")).strip().lower() or "query"
                             fake = RoutedToolCall(name, {"query": q})

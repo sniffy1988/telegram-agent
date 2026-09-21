@@ -60,7 +60,32 @@ TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
         "температур",
         "градус",
     ),
-    "fuel": ("fuel", "ukr_fuel", "азс", "бензин", "дизел", "socar", "wog", "okko", "ukrnafta"),
+    "fuel": (
+        "fuel",
+        "ukr_fuel",
+        "азс",
+        "заправ",
+        "бензин",
+        "дизел",
+        "дизель",
+        "соляр",
+        "соляра",
+        "дп",
+        "diesel",
+        "petrol",
+        "gasoline",
+        "палив",
+        "palyvo",
+        "palivo",
+        "benzin",
+        "socar",
+        "wog",
+        "okko",
+        "ukrnafta",
+        "а-95",
+        "а-92",
+        "а-98",
+    ),
     "usd": ("usd", "dollar", "долар", "доллар", "obmenka"),
     "eur": ("eur", "euro", "євро", "eur/usd"),
 }
@@ -115,7 +140,16 @@ PRIMARY_ROUTE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 FUEL_ROUTE = re.compile(
-    r"\b(бензин|дизел|палив|fuel|азс|socar|wog|okko|ukrnafta)\b", re.I
+    r"(?:"
+    r"\b(дп|dp)\b|"
+    r"\b(дизел\w*|соляр\w*|diesel)\b|"
+    r"\b(бензин\w*|petrol|gasoline|benzin\w*)\b|"
+    r"\b(палив\w*|palyvo|palivo|fuel|ukr[_-]?fuel)\b|"
+    r"\b(азс|заправ\w*|gas\s+station)\b|"
+    r"\b(а[\s-]?9[258]|95[\s-]?octane)\b|"
+    r"\b(socar|wog|okko|ukrnafta)\b"
+    r")",
+    re.I,
 )
 USD_HINT = re.compile(
     r"(usd|\bdollar\b|доллар|долар|бакс|cartel_usd|obmenka|"
@@ -128,9 +162,14 @@ FX_GENERIC = re.compile(r"\bкурс\b", re.I)
 
 HA_FACTUAL_PATTERNS = re.compile(
     r"(курс|долар|доллар|dollar|usd|eur|євро|евро|погод|weather|температур|"
-    r"градус|амброз|ragweed|пыльц|pollen|бензин|fuel|азс|pm2|cartel|obmenka)",
+    r"градус|амброз|ragweed|пыльц|pollen|бензин|дизел|соляр|дп|diesel|палив|fuel|азс|"
+    r"заправ|pm2|cartel|obmenka|socar|wog|okko)",
     re.I,
 )
+
+
+def message_mentions_fuel(text: str) -> bool:
+    return bool(FUEL_ROUTE.search(text.strip().lower()))
 
 
 def message_expects_ha_facts(text: str) -> bool:
@@ -140,6 +179,8 @@ def message_expects_ha_facts(text: str) -> bool:
 def fx_ha_topics_from_text(lower: str) -> list[str]:
     """0–2 topics: USD and/or EUR (Cartel sensors are separate entity groups)."""
     if ENTITY_ID_RE.fullmatch(lower.strip()):
+        return []
+    if message_mentions_fuel(lower):
         return []
     topics: list[str] = []
     if EUR_HINT.search(lower):
@@ -181,6 +222,8 @@ FOLLOWUP_REPEAT = re.compile(
 
 def resolve_tool_topic(query: str) -> str | None:
     q_lower = query.lower().strip()
+    if q_lower == "fuel" or message_mentions_fuel(q_lower):
+        return "fuel"
     for topic in TOOL_TOPIC_ORDER:
         kws = TOPIC_KEYWORDS[topic]
         if q_lower == topic or any(k in q_lower for k in kws):

@@ -8,10 +8,12 @@ from agent import Agent
 from config import Settings
 from memory import MemoryStore
 from tools import ToolRegistry
+from ha_control import HomeAssistantControlClient, PendingHaControl
 from tools_ha import HomeAssistantTool
+from tools_ha_control import HomeAssistantControlTool
 
 
-def _settings(tmp_path) -> Settings:
+def _settings(tmp_path, *, ha_control_enabled: bool = False) -> Settings:
     return Settings(
         telegram_bot_token="x",
         telegram_allowed_chat_ids=frozenset(),
@@ -27,6 +29,8 @@ def _settings(tmp_path) -> Settings:
         ha_all_entities_limit=500,
         ha_topic_match_limit=25,
         ha_tool_json_max_chars=14000,
+        ha_control_enabled=ha_control_enabled,
+        ha_control_domains=frozenset({"switch"}),
     )
 
 
@@ -166,3 +170,49 @@ async def test_usd_success_short_circuit(tmp_path) -> None:
     result = await agent.handle(1, "курс доллара")
     assert "44.7" in result.text
     ollama.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ha_control_prepare_returns_pending(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    ollama.chat = AsyncMock(
+        return_value={
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "ha_control",
+                        "arguments": {
+                            "entity_id": "switch.lamp",
+                            "action": "turn_off",
+                        },
+                    }
+                }
+            ]
+        }
+    )
+    reg = ToolRegistry()
+    reg.register(HomeAssistantTool("http://ha", "t"))
+    ctrl = HomeAssistantControlClient(
+        "http://ha",
+        "t",
+        allowed_domains=frozenset({"switch"}),
+    )
+    ctrl_tool = HomeAssistantControlTool(ctrl)
+    pending = PendingHaControl(
+        entity_id="switch.lamp",
+        domain="switch",
+        service="turn_off",
+        friendly_name="Lamp",
+    )
+
+    async def prepare_ok(arguments, context):
+        return {"ok": True, "pending": pending}
+
+    ctrl_tool.execute = prepare_ok  # type: ignore[method-assign]
+    reg.register(ctrl_tool)
+    agent = Agent(_settings(tmp_path, ha_control_enabled=True), memory, ollama, reg)
+    result = await agent.handle(1, "выключи лампу в спальне")
+    assert result.pending_ha_control == pending
+    assert "Lamp" in result.text
+    assert "Да" in result.text or "«Да»" in result.text

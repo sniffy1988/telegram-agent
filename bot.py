@@ -32,13 +32,16 @@ from telegram_utils import (
     split_message,
 )
 from tools import ToolRegistry
+from ha_control import HomeAssistantControlClient
 from tools_ha import HomeAssistantTool
+from tools_ha_control import HomeAssistantControlTool
 from tools_image import ReverseImageTool
 from tools_web import ImageSearchTool, WebSearchTool, download_image
 
 logger = logging.getLogger(__name__)
 
 FORGET_CONFIRM_PREFIX = "forget:"
+HA_CONTROL_CONFIRM_PREFIX = "ha_ctrl:"
 
 
 def _allowed_chat(update: Update, allowed: frozenset[int]) -> bool:
@@ -145,6 +148,47 @@ async def forget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def ha_control_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    if not _allowed_chat(update, context.bot_data["allowed_chat_ids"]):
+        await query.answer()
+        return
+    await query.answer()
+    chat_id = query.message.chat_id if query.message else None
+    if chat_id is None:
+        return
+    pending_map = context.bot_data.get("pending_ha_control") or {}
+    pending = pending_map.pop(chat_id, None)
+    context.bot_data["pending_ha_control"] = pending_map
+
+    if query.data == f"{HA_CONTROL_CONFIRM_PREFIX}no":
+        await query.edit_message_text("Управление отменено.")
+        return
+    if query.data != f"{HA_CONTROL_CONFIRM_PREFIX}yes":
+        return
+    if pending is None:
+        await query.edit_message_text("Нет ожидающего действия (устарело).")
+        return
+    tool = context.bot_data.get("ha_control_tool")
+    if tool is None:
+        await query.edit_message_text("Управление HA отключено на сервере.")
+        return
+    result = await tool.execute(
+        {},
+        {"confirmed_apply": True, "pending_ha_control": pending},
+    )
+    if result.get("ok"):
+        await query.edit_message_text(
+            f"Готово: {pending.service} — {pending.friendly_name}."
+        )
+    else:
+        await query.edit_message_text(
+            "Не удалось выполнить команду в Home Assistant."
+        )
+
+
 async def forget_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.data:
@@ -235,7 +279,37 @@ async def _process_message(
         )
 
         chunks = split_message(result.text)
-        await finalize_status_reply(status_msg, user_message, chunks[0])
+        confirm_keyboard = None
+        if result.pending_ha_control is not None:
+            pending_map = context.bot_data.setdefault("pending_ha_control", {})
+            pending_map[chat_id] = result.pending_ha_control
+            confirm_keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "Да",
+                            callback_data=f"{HA_CONTROL_CONFIRM_PREFIX}yes",
+                        ),
+                        InlineKeyboardButton(
+                            "Нет",
+                            callback_data=f"{HA_CONTROL_CONFIRM_PREFIX}no",
+                        ),
+                    ]
+                ]
+            )
+        if confirm_keyboard:
+            try:
+                await status_msg.edit_text(chunks[0], reply_markup=confirm_keyboard)
+            except Exception:
+                await finalize_status_reply(status_msg, user_message, chunks[0])
+                await user_message.get_bot().send_message(
+                    chat_id=user_message.chat_id,
+                    text="Подтвердите действие:",
+                    reply_markup=confirm_keyboard,
+                    **reply_send_kwargs(user_message),
+                )
+        else:
+            await finalize_status_reply(status_msg, user_message, chunks[0])
         bot = user_message.get_bot()
         for extra in chunks[1:]:
             await bot.send_message(
@@ -331,6 +405,13 @@ def build_registry(settings) -> ToolRegistry:
             topic_match_limit=settings.ha_topic_match_limit,
         )
     )
+    if settings.ha_control_enabled:
+        client = HomeAssistantControlClient(
+            settings.home_assistant_url,
+            settings.home_assistant_token,
+            allowed_domains=settings.ha_control_domains,
+        )
+        reg.register(HomeAssistantControlTool(client))
     reg.register(WebSearchTool(settings.max_search_results))
     reg.register(ImageSearchTool(settings.max_images))
     reg.register(ReverseImageTool())
@@ -341,13 +422,19 @@ def main() -> None:
     configure_logging()
     settings = load_settings()
     logger.info(
-        "[startup] ollama=%s model=%s ha=%s ha_token=%s memory=%s",
+        "[startup] ollama=%s model=%s ha=%s ha_token=%s ha_control=%s memory=%s",
         settings.ollama_url,
         settings.ollama_model,
         settings.home_assistant_url,
         "set" if settings.home_assistant_token else "missing",
+        settings.ha_control_enabled,
         settings.memory_path,
     )
+    if settings.ha_control_enabled and not settings.telegram_allowed_chat_ids:
+        logger.warning(
+            "[startup] HA_CONTROL_ENABLED but TELEGRAM_ALLOWED_CHAT_IDS is empty — "
+            "restrict chat IDs before enabling control in production"
+        )
     memory = MemoryStore(settings.memory_path)
     ollama = OllamaClient(
         settings.ollama_url, settings.ollama_model, settings.ollama_timeout
@@ -374,6 +461,9 @@ def main() -> None:
     app.bot_data["agent"] = agent
     app.bot_data["ollama"] = ollama
     app.bot_data["allowed_chat_ids"] = settings.telegram_allowed_chat_ids
+    ha_control_tool = registry.get("ha_control")
+    if ha_control_tool is not None:
+        app.bot_data["ha_control_tool"] = ha_control_tool
 
     app.add_handler(CommandHandler("chatid", chatid_cmd))
     app.add_handler(CommandHandler("start", start_cmd))
@@ -381,6 +471,11 @@ def main() -> None:
     app.add_handler(CommandHandler("memory", memory_cmd))
     app.add_handler(CommandHandler("forget", forget_cmd))
     app.add_handler(CallbackQueryHandler(forget_callback, pattern=f"^{FORGET_CONFIRM_PREFIX}"))
+    app.add_handler(
+        CallbackQueryHandler(
+            ha_control_callback, pattern=f"^{HA_CONTROL_CONFIRM_PREFIX}"
+        )
+    )
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)

@@ -28,6 +28,8 @@ class Settings:
     ha_all_entities_limit: int
     ha_topic_match_limit: int
     ha_tool_json_max_chars: int
+    ha_control_enabled: bool
+    ha_control_domains: frozenset[str]
 
 
 def _parse_chat_ids(raw: str) -> frozenset[int]:
@@ -51,6 +53,18 @@ def _int_env(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "1" if default else "0").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _domains_env(name: str, default: frozenset[str]) -> frozenset[str]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
 def _float_env(name: str, default: float) -> float:
@@ -93,4 +107,11 @@ def load_settings() -> Settings:
         ha_all_entities_limit=_int_env("HA_ALL_ENTITIES_LIMIT", 500),
         ha_topic_match_limit=_int_env("HA_TOPIC_MATCH_LIMIT", 25),
         ha_tool_json_max_chars=_int_env("HA_TOOL_JSON_MAX_CHARS", 14000),
+        ha_control_enabled=_bool_env("HA_CONTROL_ENABLED", False),
+        ha_control_domains=_domains_env(
+            "HA_CONTROL_DOMAINS",
+            frozenset(
+                {"light", "switch", "fan", "humidifier", "vacuum", "input_boolean"}
+            ),
+        ),
     )

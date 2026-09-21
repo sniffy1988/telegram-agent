@@ -12,6 +12,7 @@ from ha_topics import (
     PRIMARY_ROUTE_PATTERNS,
     fx_ha_topics_from_text,
     last_ha_topic_from_history,
+    message_mentions_fuel,
 )
 
 ChatTurn = dict[str, str]
@@ -104,8 +105,28 @@ def _is_short_followup(text: str) -> bool:
     return bool(FOLLOWUP_PREFIX.match(t) or FOLLOWUP_REPEAT.search(t))
 
 
+def _followup_carries_same_topic(lower: str) -> bool:
+    """«а сейчас?» / «а евро?» — да; «а сколько стоит ДП?» — нет."""
+    rest = FOLLOWUP_PREFIX.sub("", lower).strip() if FOLLOWUP_PREFIX.match(lower) else lower
+    if message_mentions_fuel(lower) or message_mentions_fuel(rest):
+        return False
+    if re.search(r"(сколько|скільки|ціна|цена|стоит|стоим|кошту)", rest):
+        return False
+    if FOLLOWUP_REPEAT.search(lower) or FOLLOWUP_REPEAT.search(rest):
+        return True
+    if len(rest) <= 18 and re.fullmatch(
+        r"(евро|євро|eur|доллар|долар|usd|на\s+улице\??|снаружи\??)\??",
+        rest,
+        re.I,
+    ):
+        return True
+    return len(rest) <= 12
+
+
 def _contextual_ha_topic(text: str, history: list[ChatTurn]) -> str | None:
     lower = text.lower().strip()
+    if message_mentions_fuel(lower):
+        return "fuel"
     if re.search(r"(евро|євро|euro|\beur\b)", lower):
         return "eur"
     if re.search(r"(доллар|долар|dollar|\busd\b)", lower):
@@ -113,10 +134,11 @@ def _contextual_ha_topic(text: str, history: list[ChatTurn]) -> str | None:
     if FOLLOWUP_OUTDOOR.search(lower):
         return "weather"
     last = last_ha_topic_from_history(history)
-    if FOLLOWUP_REPEAT.search(lower) and last:
+    if not last:
+        return None
+    if FOLLOWUP_REPEAT.search(lower) and _followup_carries_same_topic(lower):
         return last
-    # «а в комнатах?» already has keywords; if only «а сейчас?» after weather question
-    if FOLLOWUP_REPEAT.search(lower) or FOLLOWUP_PREFIX.match(lower):
+    if FOLLOWUP_PREFIX.match(lower) and _followup_carries_same_topic(lower):
         return last
     return None
 

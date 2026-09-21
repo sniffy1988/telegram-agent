@@ -1,6 +1,6 @@
 # familyai (telegram-agent)
 
-Private Telegram assistant: Ollama, per-chat memory, read-only Home Assistant, web/image search.
+Private Telegram assistant: Ollama, per-chat memory, Home Assistant (read-only by default; optional confirmed control), web/image search.
 
 ## Docker on Mac (Colima)
 
@@ -124,9 +124,19 @@ Bridge-only fallback: `colima stop && colima start --network-address` (then try 
 | Воздух | «pm2.5», «влажность», «качество воздуха» |
 | Амброзия / пыльца | «амброзия», «ragweed», «пыльца silam» |
 | Курс | «курс доллара», «cartel», «євро» |
-| АЗС | «дизель socar», «цена на азс» |
+| АЗС / топливо | «дизель/соляра», «ДП», «socar», «цена на азс», «бензин 95», «wog» |
 | Всё read-only | «все сущности в HA», `sensor.cartel_usd_buy` |
 | Уточнение | после вопроса о погоде: «а сейчас?» (контекст чата) |
+
+### Управление устройствами (опционально)
+
+По умолчанию бот **только читает** HA. Чтобы включить свет/выключатели/увлажнитель/пылесос:
+
+1. Задайте **`TELEGRAM_ALLOWED_CHAT_IDS`** (команда `/chatid`).
+2. В `.env`: **`HA_CONTROL_ENABLED=1`** (при необходимости **`HA_CONTROL_DOMAINS=...`**).
+3. Перезапустите контейнер.
+
+Фразы вроде «выключи switch.rozumnii_peremikach_2» или «включи свет на кухне» — модель сначала может вызвать `ha_query`, затем `ha_control`. Перед выполнением в Telegram появятся кнопки **Да** / **Нет**; без «Да» команда в HA не уходит.
 
 Команды: `/chatid` — ваш `chat_id` для `TELEGRAM_ALLOWED_CHAT_IDS`; `/clear`, `/memory`.
 

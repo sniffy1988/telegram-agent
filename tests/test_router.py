@@ -25,6 +25,10 @@ def _ha_queries(calls: list) -> list[str]:
         ("влажность снаружи", ["air"]),
         ("дизель socar", ["fuel"]),
         ("цена на азс", ["fuel"]),
+        ("а сколько стоит ДП?", ["fuel"]),
+        ("скільки коштує дизель?", ["fuel"]),
+        ("сколько стоит бензин 95", ["fuel"]),
+        ("ціна на wog", ["fuel"]),
         ("курс доллара cartel", ["usd"]),
         ("cartel usd", ["usd"]),
         ("сколько стоит доллар", ["usd"]),
@@ -80,6 +84,17 @@ def test_contextual_outdoor() -> None:
 def test_contextual_no_history() -> None:
     calls = route_tools_with_context("а сейчас?", has_photo=False, history=[])
     assert _ha_queries(calls) == []
+
+
+def test_contextual_fuel_not_usd_after_dollar() -> None:
+    history = [
+        {"role": "user", "content": "курс доллара"},
+        {"role": "assistant", "content": "44.7 UAH"},
+    ]
+    calls = route_tools_with_context(
+        "а сколько стоит ДП?", has_photo=False, history=history
+    )
+    assert _ha_queries(calls) == ["fuel"]
 
 
 def test_contextual_euro_followup() -> None:
