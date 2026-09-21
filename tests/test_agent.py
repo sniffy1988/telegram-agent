@@ -53,6 +53,45 @@ async def test_ha_failure_short_circuit_no_invented_rate(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_pollen_success_short_circuit_factual_list(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "m.json")
+    ollama = AsyncMock()
+    ollama.chat = AsyncMock(return_value={"content": "hallucinated latin name"})
+    reg = ToolRegistry()
+    ha = HomeAssistantTool("http://ha", "t")
+
+    async def pollen_ok(arguments, context):
+        return {
+            "ok": True,
+            "states": [
+                {
+                    "entity_id": "sensor.silam_pollen_home_ragweed",
+                    "friendly_name": "SILAM Pollen - Home Ragweed",
+                    "state": "376",
+                    "unit": None,
+                },
+                {
+                    "entity_id": "sensor.open_meteo_ragweed_pollen",
+                    "friendly_name": "Open-Meteo Ragweed pollen",
+                    "state": "109.8",
+                    "unit": None,
+                },
+            ],
+        }
+
+    ha.execute = pollen_ok  # type: ignore[method-assign]
+    reg.register(ha)
+    agent = Agent(_settings(tmp_path), memory, ollama, reg)
+    result = await agent.handle(1, "какая амброзия?")
+    assert "376" in result.text
+    assert "109.8" in result.text
+    assert "SILAM" in result.text
+    assert "hallucinated" not in result.text
+    ollama.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_temperature_routes_ha_failure_short_circuit(tmp_path) -> None:
     memory = MemoryStore(tmp_path / "m.json")
     ollama = AsyncMock()

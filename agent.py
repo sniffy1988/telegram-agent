@@ -126,6 +126,47 @@ def _ha_failure_message(user_text: str, error: str | None = None) -> str:
     return "Не смог получить запрошенные данные из Home Assistant."
 
 
+def _routed_ha_query_topic(routed: list[RoutedToolCall]) -> str | None:
+    for call in routed:
+        if call.name == "ha_query":
+            q = call.arguments.get("query")
+            if isinstance(q, str) and q.strip():
+                return q.strip().lower()
+    return None
+
+
+def _format_ha_pollen_reply(payload: dict[str, Any]) -> str:
+    states = payload.get("states")
+    if not isinstance(states, list) or not states:
+        return "Нет данных по пыльце в Home Assistant."
+    lines = ["Пыльца (Home Assistant):", ""]
+    for st in states:
+        if not isinstance(st, dict):
+            continue
+        name = str(st.get("friendly_name") or st.get("entity_id") or "?")
+        val = st.get("state")
+        unit = st.get("unit")
+        suffix = f" {unit}" if unit else ""
+        lines.append(f"• {name}: {val}{suffix}")
+    lines.extend(
+        [
+            "",
+            "В HA ragweed = амброзия (не путать с полынью/mugwort — смотрите имя датчика).",
+            "Используйте только эти значения; 0 — низкий уровень, не «датчика нет».",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _should_short_circuit_ha_pollen_success(
+    routed: list[RoutedToolCall], tool_results: dict[str, dict[str, Any]]
+) -> bool:
+    if _routed_ha_query_topic(routed) != "pollen":
+        return False
+    ha = tool_results.get("ha_query")
+    return isinstance(ha, dict) and bool(ha.get("ok"))
+
+
 def _should_short_circuit_ha_failure(
     text: str, tool_results: dict[str, dict[str, Any]]
 ) -> bool:
@@ -265,6 +306,17 @@ class Agent:
             err = ha.get("error") if isinstance(ha.get("error"), str) else None
             msg = _ha_failure_message(text_for_routing, err)
             logger.info("[agent] HA query failed (%s), short-circuit reply", err)
+            append_turn(
+                chat_id,
+                text_for_routing,
+                msg,
+                max_messages=self.settings.max_history_messages,
+            )
+            return AgentResult(text=msg, photos=photos, used_tools=used_tools)
+
+        if _should_short_circuit_ha_pollen_success(routed, tool_results):
+            msg = _format_ha_pollen_reply(tool_results["ha_query"])
+            logger.info("[agent] HA pollen ok, short-circuit factual reply")
             append_turn(
                 chat_id,
                 text_for_routing,
