@@ -97,10 +97,15 @@ def _ha_failure_message(user_text: str, error: str | None = None) -> str:
         )
     if error == "no_matching_entities":
         lower = user_text.lower()
+        if any(w in lower for w in ("комнат", "indoor", "помещен", "внутри")):
+            return (
+                "Не нашёл в Home Assistant датчики температуры в помещениях "
+                "(indoor / climate / увлажнитель / очиститель воздуха)."
+            )
         if any(w in lower for w in ("температур", "temperature", "градус", "погод", "weather")):
             return (
                 "Не нашёл в Home Assistant датчики погоды/температуры "
-                "(weather.* или open-meteo)."
+                "(weather.*, SaveEcoBot outdoor, Open-Meteo)."
             )
         return "Не нашёл в Home Assistant подходящих датчиков для этого запроса."
 

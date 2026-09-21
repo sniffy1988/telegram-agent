@@ -7,7 +7,32 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_DOMAINS = frozenset({"sensor", "binary_sensor", "weather", "number"})
+ALLOWED_DOMAINS = frozenset(
+    {"sensor", "binary_sensor", "weather", "number", "climate"}
+)
+
+# Not room air — outdoor, forecast, or device/hardware probes.
+_NON_INDOOR_TEMP_MARKERS = (
+    "open_meteo",
+    "saveecobot",
+    "outdoor",
+    "weather.",
+    "cpu",
+    "hex",
+    "board",
+    "battery",
+    "deltapro",
+    "soil",
+    "backup",
+    "l009",
+    "cap_ax",
+    "router",
+    "uptime",
+    "voltage",
+    "disk",
+    "memory",
+    "usage",
+)
 
 
 def _entity_domain(entity_id: str) -> str:
@@ -20,13 +45,59 @@ def _is_allowed_entity(entity_id: str) -> bool:
     return _entity_domain(entity_id) in ALLOWED_DOMAINS
 
 
+def _is_non_indoor_temperature(entity_id: str, blob: str) -> bool:
+    return any(m in entity_id or m in blob for m in _NON_INDOOR_TEMP_MARKERS)
+
+
+def _is_indoor_temperature_state(st: dict[str, Any]) -> bool:
+    eid = str(st.get("entity_id", ""))
+    attrs = st.get("attributes") or {}
+    fname = str(attrs.get("friendly_name", "")).lower()
+    blob = f"{eid} {fname}".lower()
+    domain = _entity_domain(eid)
+    if domain == "climate":
+        return attrs.get("current_temperature") is not None
+    if domain != "sensor":
+        return False
+    if attrs.get("device_class") != "temperature":
+        return False
+    if _is_non_indoor_temperature(eid.lower(), blob):
+        return False
+    indoor_hints = (
+        "indoor",
+        "комнат",
+        "room",
+        "bedroom",
+        "living",
+        "kitchen",
+        "спальн",
+        "вітальн",
+        "кухн",
+        "humidifier",
+        "увлажн",
+        "purifier",
+        "очист",
+        "zhimi",
+        "deerma",
+        "environment",
+    )
+    return any(h in blob for h in indoor_hints) or "indoor" in eid
+
+
 def _compact_state(state: dict[str, Any]) -> dict[str, Any]:
     attrs = state.get("attributes") or {}
     unit = attrs.get("unit_of_measurement") or attrs.get("native_unit_of_measurement")
+    eid = str(state.get("entity_id") or "")
+    display_state = state.get("state")
+    if _entity_domain(eid) == "climate":
+        ct = attrs.get("current_temperature")
+        if ct is not None:
+            display_state = ct
+            unit = unit or "°C"
     return {
         "entity_id": state.get("entity_id"),
         "friendly_name": attrs.get("friendly_name") or state.get("entity_id"),
-        "state": state.get("state"),
+        "state": display_state,
         "unit": unit,
         "last_updated": state.get("last_updated"),
     }
@@ -43,7 +114,7 @@ class HomeAssistantTool:
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Entity id, friendly name fragment, or topic: weather, fuel, usd, eur",
+                "description": "Entity id, friendly name fragment, or topic: weather, indoor, fuel, usd, eur",
             }
         },
         "required": ["query"],
@@ -102,6 +173,18 @@ class HomeAssistantTool:
 
         q_lower = query.lower()
         topic_keywords = {
+            "indoor": (
+                "indoor",
+                "inside",
+                "комнат",
+                "помещен",
+                "в доме",
+                "в квартире",
+                "внутри",
+                "bedroom",
+                "living",
+                "kitchen",
+            ),
             "weather": (
                 "weather",
                 "open_meteo",
@@ -116,7 +199,9 @@ class HomeAssistantTool:
             "eur": ("eur", "euro", "євро", "eur/usd"),
         }
         topic: str | None = None
-        for t, kws in topic_keywords.items():
+        topic_order = ("indoor", "weather", "fuel", "usd", "eur")
+        for t in topic_order:
+            kws = topic_keywords[t]
             if q_lower == t or any(k in q_lower for k in kws):
                 topic = t
                 break
@@ -127,25 +212,22 @@ class HomeAssistantTool:
             attrs = st.get("attributes") or {}
             fname = str(attrs.get("friendly_name", "")).lower()
             blob = f"{eid} {fname}".lower()
-            if topic == "weather" and (
+            if topic == "indoor" and _is_indoor_temperature_state(st):
+                matches.append(_compact_state(st))
+            elif topic == "weather" and (
                 eid.startswith("weather.")
-                or "open_meteo" in eid
-                or "weather" in blob
-                or "temperature" in blob
-                or "temperatur" in blob
-                or "температур" in blob
+                or "saveecobot_outdoor" in eid
                 or (
                     eid.startswith("sensor.")
-                    and any(
-                        x in blob
-                        for x in (
-                            "temperature",
-                            "temperatur",
-                            "температур",
-                            "outdoor",
-                            "open_meteo",
-                        )
-                    )
+                    and "open_meteo" in eid
+                    and "soil" not in eid
+                    and attrs.get("device_class") == "temperature"
+                    and eid.endswith("_temperature")
+                )
+                or (
+                    eid.startswith("sensor.")
+                    and "saveecobot" in eid
+                    and "outdoor" in blob
                 )
             ):
                 matches.append(_compact_state(st))

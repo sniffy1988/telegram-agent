@@ -23,6 +23,11 @@ def route_tools(
         calls.append(RoutedToolCall("reverse_image", {}))
 
     if re.search(
+        r"(комнат\w*|помещен\w*|indoor|inside|в\s+доме|в\s+квартире|внутри)",
+        lower,
+    ):
+        calls.append(RoutedToolCall("ha_query", {"query": "indoor"}))
+    elif re.search(
         r"(погод\w*|weather|forecast|temperature|temperatur|температур\w*|градус\w*)",
         lower,
     ):
@@ -71,7 +76,7 @@ def is_ha_factual_query(text: str) -> bool:
     return bool(
         re.search(
             r"(курс|долар|dollar|usd|eur|євро|погод|weather|бензин|fuel|азс|"
-            r"температур|temperature|градус)",
+            r"температур|temperature|градус|комнат|indoor|помещен)",
             lower,
         )
     )

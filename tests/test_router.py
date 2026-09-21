@@ -28,3 +28,12 @@ def test_route_temperature() -> None:
     assert any(
         c.name == "ha_query" and c.arguments["query"] == "weather" for c in calls
     )
+
+
+def test_route_indoor_rooms() -> None:
+    calls = route_tools("а в комнатах?", has_photo=False)
+    assert any(
+        c.name == "ha_query" and c.arguments["query"] == "indoor" for c in calls
+    )
+    calls2 = route_tools("какая температура в комнатах?", has_photo=False)
+    assert any(c.arguments.get("query") == "indoor" for c in calls2 if c.name == "ha_query")
