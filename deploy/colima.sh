@@ -26,14 +26,27 @@ if [[ ! -f .env ]]; then
   echo "Created .env from .env.example — set TELEGRAM_BOT_TOKEN before use."
 fi
 
-# Default for container: Ollama on the Mac host (not 127.0.0.1 inside the container).
 if grep -q '^OLLAMA_URL=http://127.0.0.1:11434' .env 2>/dev/null; then
   if [[ "${FAMILYAI_PATCH_OLLAMA:-1}" == "1" ]]; then
     echo "Tip: in .env use OLLAMA_URL=http://host.docker.internal:11434 for Docker."
   fi
 fi
 
-docker compose build
+export FAMILYAI_IMAGE="${FAMILYAI_IMAGE:-ghcr.io/sniffy1988/familyai-bot}"
+export FAMILYAI_TAG="${FAMILYAI_TAG:-latest}"
+
+if [[ "${FAMILYAI_PULL:-1}" == "1" ]]; then
+  echo "Pulling ${FAMILYAI_IMAGE}:${FAMILYAI_TAG} (set FAMILYAI_PULL=0 to build locally)..."
+  if docker compose pull; then
+    echo "Using image from registry."
+  else
+    echo "Pull failed — building locally..."
+    docker compose build
+  fi
+else
+  docker compose build
+fi
+
 docker compose up -d
 
 echo ""

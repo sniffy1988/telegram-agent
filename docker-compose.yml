@@ -1,7 +1,8 @@
 services:
   familyai:
-    build: .
-    image: familyai-bot:local
+    build:
+      context: .
+    image: ${FAMILYAI_IMAGE:-ghcr.io/sniffy1988/familyai-bot}:${FAMILYAI_TAG:-latest}
     container_name: familyai-bot
     env_file: .env
     environment:

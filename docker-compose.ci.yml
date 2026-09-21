@@ -1,0 +1,7 @@
+# CI-only overlay: multi-arch images for Mac (arm64) and Linux (amd64).
+services:
+  familyai:
+    build:
+      platforms:
+        - linux/amd64
+        - linux/arm64
