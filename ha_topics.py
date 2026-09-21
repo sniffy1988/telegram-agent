@@ -61,9 +61,13 @@ TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
         "градус",
     ),
     "fuel": ("fuel", "ukr_fuel", "азс", "бензин", "дизел", "socar", "wog", "okko", "ukrnafta"),
-    "usd": ("usd", "dollar", "долар", "cartel", "obmenka"),
+    "usd": ("usd", "dollar", "долар", "доллар", "obmenka"),
     "eur": ("eur", "euro", "євро", "eur/usd"),
 }
+
+# Entity matching in tools_ha (stricter than routing — "cartel" alone is not USD).
+USD_ENTITY_MARKERS = ("cartel_usd", "_usd_", ".usd")
+EUR_ENTITY_MARKERS = ("cartel_eur", "_eur_", ".eur")
 
 # Deterministic Telegram replies (no LLM) for these topics on HA success.
 FACTUAL_REPLY_TOPICS = frozenset(
@@ -113,8 +117,58 @@ PRIMARY_ROUTE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 FUEL_ROUTE = re.compile(
     r"\b(бензин|дизел|палив|fuel|азс|socar|wog|okko|ukrnafta)\b", re.I
 )
-FX_ROUTE = re.compile(r"\b(курс|долар|dollar|usd|obmenka|cartel|євро|eur)\b", re.I)
-EUR_HINT = re.compile(r"\b(eur|євро|euro)\b", re.I)
+USD_HINT = re.compile(
+    r"(usd|\bdollar\b|доллар|долар|бакс|cartel_usd|obmenka|"
+    r"дол\.?\s*usa|долlar\s*usa)",
+    re.I,
+)
+EUR_HINT = re.compile(r"\b(eur|євро|euro|евро)\b", re.I)
+CARTEL_HINT = re.compile(r"\bcartel\b", re.I)
+FX_GENERIC = re.compile(r"\bкурс\b", re.I)
+
+HA_FACTUAL_PATTERNS = re.compile(
+    r"(курс|долар|доллар|dollar|usd|eur|євро|евро|погод|weather|температур|"
+    r"градус|амброз|ragweed|пыльц|pollen|бензин|fuel|азс|pm2|cartel|obmenka)",
+    re.I,
+)
+
+
+def message_expects_ha_facts(text: str) -> bool:
+    return bool(HA_FACTUAL_PATTERNS.search(text.strip()))
+
+
+def fx_ha_topics_from_text(lower: str) -> list[str]:
+    """0–2 topics: USD and/or EUR (Cartel sensors are separate entity groups)."""
+    if ENTITY_ID_RE.fullmatch(lower.strip()):
+        return []
+    topics: list[str] = []
+    if EUR_HINT.search(lower):
+        topics.append("eur")
+    if USD_HINT.search(lower):
+        topics.append("usd")
+    if not topics and CARTEL_HINT.search(lower):
+        topics.append("usd")
+    if not topics and FX_GENERIC.search(lower):
+        topics.append("usd")
+    return topics
+
+
+def entity_matches_usd(entity_id: str) -> bool:
+    el = entity_id.lower()
+    if "eur" in el and "usd" not in el:
+        return False
+    return any(m in el for m in USD_ENTITY_MARKERS) or (
+        "usd" in el and "cartel" in el
+    )
+
+
+def entity_matches_eur(entity_id: str) -> bool:
+    el = entity_id.lower()
+    if "usd" in el and "eur" not in el:
+        return False
+    return any(m in el for m in EUR_ENTITY_MARKERS) or (
+        "eur" in el and "cartel" in el
+    )
 
 FOLLOWUP_PREFIX = re.compile(r"^(а|и|ну)\s+", re.I)
 FOLLOWUP_OUTDOOR = re.compile(r"(на\s+улице|outdoor|снаружи)", re.I)

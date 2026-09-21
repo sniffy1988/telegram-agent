@@ -5,13 +5,12 @@ from dataclasses import dataclass
 
 from ha_topics import (
     ENTITY_ID_RE,
-    EUR_HINT,
     FOLLOWUP_OUTDOOR,
     FOLLOWUP_PREFIX,
     FOLLOWUP_REPEAT,
-    FX_ROUTE,
     FUEL_ROUTE,
     PRIMARY_ROUTE_PATTERNS,
+    fx_ha_topics_from_text,
     last_ha_topic_from_history,
 )
 
@@ -63,12 +62,11 @@ def route_tools(
         if not any(c.arguments.get("query") == "fuel" for c in calls if c.name == "ha_query"):
             calls.append(RoutedToolCall("ha_query", {"query": "fuel"}))
 
-    if FX_ROUTE.search(lower):
-        topic = "eur" if EUR_HINT.search(lower) else "usd"
+    for fx_topic in fx_ha_topics_from_text(lower):
         if not any(
-            c.arguments.get("query") in ("usd", "eur") for c in calls if c.name == "ha_query"
+            c.name == "ha_query" and c.arguments.get("query") == fx_topic for c in calls
         ):
-            calls.append(RoutedToolCall("ha_query", {"query": topic}))
+            calls.append(RoutedToolCall("ha_query", {"query": fx_topic}))
 
     if re.search(
         r"\b(знайди|search|find|google|новини|news|lookup|шукай)\b", lower

@@ -17,7 +17,7 @@ from ollama_client import (
     OllamaUnavailableError,
 )
 from ha_replies import format_ha_reply
-from ha_topics import FACTUAL_REPLY_TOPICS
+from ha_topics import FACTUAL_REPLY_TOPICS, message_expects_ha_facts
 from router import RoutedToolCall, route_tools_with_context
 from tools import ToolRegistry
 from telegram_utils import StatusStage
@@ -301,8 +301,18 @@ class Agent:
                     logger.debug("[tool] %s payload=%s", call.name, _safe_tool_log(payload))
 
         if _should_short_circuit_ha_failure(text_for_routing, tool_results):
-            ha = tool_results["ha_query"]
-            err = ha.get("error") if isinstance(ha.get("error"), str) else None
+            err: str | None = None
+            ha_topics = _ha_topics(tool_results)
+            if ha_topics:
+                for payload in ha_topics.values():
+                    if not payload.get("ok"):
+                        e = payload.get("error")
+                        err = e if isinstance(e, str) else None
+                        break
+            elif "ha_query" in tool_results:
+                ha = tool_results["ha_query"]
+                e = ha.get("error")
+                err = e if isinstance(e, str) else None
             msg = _ha_failure_message(text_for_routing, err)
             logger.info("[agent] HA query failed (%s), short-circuit reply", err)
             append_turn(
@@ -320,6 +330,17 @@ class Agent:
                 "[agent] HA %s ok, short-circuit factual reply",
                 sorted(ha_topics.keys()),
             )
+            append_turn(
+                chat_id,
+                text_for_routing,
+                msg,
+                max_messages=self.settings.max_history_messages,
+            )
+            return AgentResult(text=msg, photos=photos, used_tools=used_tools)
+
+        if message_expects_ha_facts(text_for_routing) and not _ha_topics(tool_results):
+            msg = _ha_failure_message(text_for_routing, "no_matching_entities")
+            logger.info("[agent] HA factual question but no HA query ran, short-circuit")
             append_turn(
                 chat_id,
                 text_for_routing,

@@ -6,7 +6,12 @@ from typing import Any
 
 import httpx
 
-from ha_topics import TOPIC_KEYWORDS, resolve_tool_topic
+from ha_topics import (
+    TOPIC_KEYWORDS,
+    entity_matches_eur,
+    entity_matches_usd,
+    resolve_tool_topic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,9 +278,9 @@ class HomeAssistantTool:
                 "fuel" in eid or "ukr_fuel" in eid or any(x in blob for x in topic_keywords["fuel"])
             ):
                 matches.append(compact(st))
-            elif topic == "usd" and any(x in blob for x in topic_keywords["usd"]):
+            elif topic == "usd" and entity_matches_usd(str(eid)):
                 matches.append(compact(st))
-            elif topic == "eur" and any(x in blob for x in topic_keywords["eur"]):
+            elif topic == "eur" and entity_matches_eur(str(eid)):
                 matches.append(compact(st))
             elif query in eid or q_lower in fname or q_lower in eid:
                 matches.append(compact(st))

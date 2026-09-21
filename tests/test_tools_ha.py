@@ -41,6 +41,39 @@ async def test_usd_topic_does_not_match_light() -> None:
     assert result["ok"] is True
     assert len(result["states"]) == 1
     assert result["states"][0]["entity_id"] == "sensor.usd_buy"
+
+
+@pytest.mark.asyncio
+async def test_usd_topic_excludes_cartel_eur() -> None:
+    states = [
+        {
+            "entity_id": "sensor.cartel_usd_buy",
+            "state": "44.7",
+            "attributes": {"friendly_name": "Cartel USD Buy", "unit_of_measurement": "UAH"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "sensor.cartel_eur_buy",
+            "state": "51.65",
+            "attributes": {"friendly_name": "Cartel EUR Buy", "unit_of_measurement": "UAH"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = states
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("tools_ha.httpx.AsyncClient", return_value=mock_client):
+        tool = HomeAssistantTool("http://ha.test", "token")
+        result = await tool.execute({"query": "usd"}, {})
+
+    assert result["ok"] is True
+    ids = {s["entity_id"] for s in result["states"]}
+    assert ids == {"sensor.cartel_usd_buy"}
     assert _is_allowed_entity("switch.foo")
     assert not _is_allowed_entity("not-an-entity")
 
