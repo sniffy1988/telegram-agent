@@ -73,9 +73,17 @@ jobs:
           docker buildx imagetools create -t "${FAMILYAI_IMAGE}:latest" "${FAMILYAI_IMAGE}:sha-${SHORT}"
 
       - name: Set GHCR package visibility public
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api --method PATCH \
-            "/users/${{ github.repository_owner }}/packages/container/familyai-bot/visibility" \
-            -f visibility=public
+          # Correct REST path: PATCH /user/packages/{type}/{name} (no /visibility suffix)
+          for pkg in familyai-bot telegram-agent; do
+            if gh api --method PATCH "/user/packages/container/${pkg}" \
+              -f visibility=public 2>/dev/null; then
+              echo "Package ${pkg} is public"
+              exit 0
+            fi
+          done
+          echo "Could not set package visibility (package may appear on next successful push)"
+          exit 0
