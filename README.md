@@ -6,6 +6,42 @@ Private Telegram assistant: Ollama, per-chat memory, read-only Home Assistant, w
 
 Images are built on every push to `main` via GitHub Actions (`docker compose`) and pushed to `ghcr.io/sniffy1988/familyai-bot:latest` (multi-arch: amd64 + arm64).
 
+### Только образ (без клонирования репозитория)
+
+На Mac mini с Colima и HA в LAN (`10.10.x`) нужен **host network** — иначе контейнер не достучится до Home Assistant.
+
+```bash
+mkdir -p ~/familyai/data && cd ~/familyai
+
+curl -fsSLO https://raw.githubusercontent.com/sniffy1988/telegram-agent/main/docker-compose.pull.yml
+mv docker-compose.pull.yml docker-compose.yml
+
+# .env: TELEGRAM_BOT_TOKEN, HOME_ASSISTANT_TOKEN, при необходимости HOME_ASSISTANT_URL
+nano .env
+
+docker compose pull
+docker compose up -d
+docker compose logs -f familyai
+```
+
+Минимальный шаблон переменных: [`deploy/.env.example.minimal`](deploy/.env.example.minimal).
+
+В `.env` для Colima: `OLLAMA_URL=http://host.lima.internal:11434`.
+
+Обновление: `docker compose pull && docker compose up -d`.
+
+Эквivalent без compose:
+
+```bash
+docker pull ghcr.io/sniffy1988/familyai-bot:latest
+docker rm -f familyai-bot 2>/dev/null; mkdir -p ~/familyai/data
+docker run -d --name familyai-bot --network host --env-file ~/familyai/.env \
+  -e MEMORY_PATH=/app/data/memory.json \
+  -e OLLAMA_URL=http://host.lima.internal:11434 \
+  -v ~/familyai/data:/app/data --restart unless-stopped \
+  ghcr.io/sniffy1988/familyai-bot:latest
+```
+
 1. Copy `.env.example` to `.env` and set `TELEGRAM_BOT_TOKEN`.
 2. **Colima (recommended on Mac mini):** `./deploy/colima.sh` uses **host network** so the bot can reach **Home Assistant on LAN** (`10.10.30.x`) and Ollama on the Mac (`OLLAMA_URL=http://host.lima.internal:11434` in `.env`).
 3. Plain Docker bridge only: `OLLAMA_URL=http://host.docker.internal:11434` — HA on another LAN IP may **not** work from the container.

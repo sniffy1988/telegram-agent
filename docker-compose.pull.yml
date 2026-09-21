@@ -1,0 +1,25 @@
+# Image-only deploy (no git clone, no local build).
+# Mac + Colima + Home Assistant on LAN: host network reaches 10.10.x and Ollama on the Mac.
+#
+#   mkdir -p ~/familyai/data && cd ~/familyai
+#   curl -fsSLO https://raw.githubusercontent.com/sniffy1988/telegram-agent/main/docker-compose.pull.yml
+#   mv docker-compose.pull.yml docker-compose.yml
+#   cp .env.example .env   # or create .env manually
+#   docker compose pull && docker compose up -d
+#
+services:
+  familyai:
+    image: ghcr.io/sniffy1988/familyai-bot:latest
+    container_name: familyai-bot
+    network_mode: host
+    env_file: .env
+    environment:
+      MEMORY_PATH: /app/data/memory.json
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.lima.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b-mlx}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
+      HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://10.10.30.18:8123}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
