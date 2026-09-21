@@ -8,7 +8,7 @@ Images are built on every push to `main` via GitHub Actions (`docker compose`) a
 
 1. Copy `.env.example` to `.env` and set `TELEGRAM_BOT_TOKEN`.
 2. For Docker, set `OLLAMA_URL=http://host.docker.internal:11434` (Ollama on the Mac host).
-3. Log in to GHCR once (private repo package): `echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin`
+3. Pull public image (no login usually needed): `docker compose pull`. For private GHCR packages, run `docker login ghcr.io`.
 4. Run:
 
 ```bash
