@@ -30,7 +30,7 @@ docker compose logs -f familyai
 
 Обновление: `docker compose pull && docker compose up -d`.
 
-Эквivalent без compose:
+Эквивалент без compose:
 
 ```bash
 docker pull ghcr.io/sniffy1988/familyai-bot:latest
