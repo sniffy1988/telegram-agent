@@ -23,6 +23,12 @@ def route_tools(
         calls.append(RoutedToolCall("reverse_image", {}))
 
     if re.search(
+        r"(все\s+датчик|список\s+датчик|какие\s+датчик|перечисли\s+датчик|"
+        r"all\s+sensors?|list\s+sensors?)",
+        lower,
+    ):
+        calls.append(RoutedToolCall("ha_query", {"query": "all"}))
+    elif re.search(
         r"(комнат\w*|помещен\w*|indoor|inside|в\s+доме|в\s+квартире|внутри)",
         lower,
     ):

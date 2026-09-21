@@ -30,6 +30,13 @@ def test_route_temperature() -> None:
     )
 
 
+def test_route_all_sensors() -> None:
+    calls = route_tools("покажи все датчики в HA", has_photo=False)
+    assert any(
+        c.name == "ha_query" and c.arguments["query"] == "all" for c in calls
+    )
+
+
 def test_route_indoor_rooms() -> None:
     calls = route_tools("а в комнатах?", has_photo=False)
     assert any(

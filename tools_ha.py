@@ -7,6 +7,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Cap for ha_query topic "all" (Telegram + Ollama context size).
+ALL_SENSORS_LIST_LIMIT = 60
+
 ALLOWED_DOMAINS = frozenset(
     {"sensor", "binary_sensor", "weather", "number", "climate"}
 )
@@ -114,7 +117,7 @@ class HomeAssistantTool:
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Entity id, friendly name fragment, or topic: weather, indoor, fuel, usd, eur",
+                "description": "Entity id, friendly name fragment, or topic: all, weather, indoor, fuel, usd, eur",
             }
         },
         "required": ["query"],
@@ -197,9 +200,18 @@ class HomeAssistantTool:
             "fuel": ("fuel", "ukr_fuel", "азс", "бензин", "дизел", "socar", "wog", "okko"),
             "usd": ("usd", "dollar", "долар", "cartel", "obmenka"),
             "eur": ("eur", "euro", "євро", "eur/usd"),
+            "all": (
+                "all",
+                "все датчик",
+                "все sensor",
+                "список датчик",
+                "какие датчик",
+                "перечисли датчик",
+                "all sensor",
+            ),
         }
         topic: str | None = None
-        topic_order = ("indoor", "weather", "fuel", "usd", "eur")
+        topic_order = ("all", "indoor", "weather", "fuel", "usd", "eur")
         for t in topic_order:
             kws = topic_keywords[t]
             if q_lower == t or any(k in q_lower for k in kws):
@@ -212,7 +224,9 @@ class HomeAssistantTool:
             attrs = st.get("attributes") or {}
             fname = str(attrs.get("friendly_name", "")).lower()
             blob = f"{eid} {fname}".lower()
-            if topic == "indoor" and _is_indoor_temperature_state(st):
+            if topic == "all":
+                matches.append(_compact_state(st))
+            elif topic == "indoor" and _is_indoor_temperature_state(st):
                 matches.append(_compact_state(st))
             elif topic == "weather" and (
                 eid.startswith("weather.")
@@ -283,10 +297,17 @@ class HomeAssistantTool:
             )
             return {"ok": False, "error": "no_matching_entities", "states": []}
 
+        matches.sort(key=lambda m: str(m.get("entity_id", "")))
+        limit = ALL_SENSORS_LIST_LIMIT if topic == "all" else 15
+        page = matches[:limit]
         logger.info(
             "[ha] matched %s entities (topic=%s): %s",
             len(matches),
             topic,
-            [m.get("entity_id") for m in matches[:5]],
+            [m.get("entity_id") for m in page[:5]],
         )
-        return {"ok": True, "states": matches[:15]}
+        out: dict[str, Any] = {"ok": True, "states": page}
+        if topic == "all" and len(matches) > limit:
+            out["total"] = len(matches)
+            out["truncated"] = True
+        return out

@@ -109,3 +109,42 @@ async def test_indoor_temperature_filters_outdoor_and_hardware() -> None:
     assert "sensor.deerma_jsq2w_temperature" in ids
     assert "sensor.open_meteo_temperature" not in ids
     assert "sensor.hexs_board_temperature_1" not in ids
+
+
+@pytest.mark.asyncio
+async def test_all_sensors_returns_allowlisted_domains() -> None:
+    states = [
+        {
+            "entity_id": "sensor.a",
+            "state": "1",
+            "attributes": {"friendly_name": "A"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "light.kitchen",
+            "state": "on",
+            "attributes": {"friendly_name": "Kitchen"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "binary_sensor.door",
+            "state": "off",
+            "attributes": {"friendly_name": "Door"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = states
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("tools_ha.httpx.AsyncClient", return_value=mock_client):
+        tool = HomeAssistantTool("http://ha.test", "token")
+        result = await tool.execute({"query": "all"}, {})
+
+    assert result["ok"] is True
+    ids = {s["entity_id"] for s in result["states"]}
+    assert ids == {"binary_sensor.door", "sensor.a"}
