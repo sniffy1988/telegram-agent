@@ -282,7 +282,9 @@ class HomeAssistantTool:
                 matches.append(compact(st))
             elif topic == "eur" and entity_matches_eur(str(eid)):
                 matches.append(compact(st))
-            elif query in eid or q_lower in fname or q_lower in eid:
+            elif topic is None and (
+                query in eid or q_lower in fname or q_lower in eid
+            ):
                 matches.append(compact(st))
 
         if not matches and "." in query:

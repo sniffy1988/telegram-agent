@@ -80,3 +80,12 @@ def test_contextual_outdoor() -> None:
 def test_contextual_no_history() -> None:
     calls = route_tools_with_context("а сейчас?", has_photo=False, history=[])
     assert _ha_queries(calls) == []
+
+
+def test_contextual_euro_followup() -> None:
+    history = [
+        {"role": "user", "content": "сколько стоит доллар?"},
+        {"role": "assistant", "content": "44.7 UAH"},
+    ]
+    calls = route_tools_with_context("а евро?", has_photo=False, history=history)
+    assert _ha_queries(calls) == ["eur"]

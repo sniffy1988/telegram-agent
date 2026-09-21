@@ -106,6 +106,10 @@ def _is_short_followup(text: str) -> bool:
 
 def _contextual_ha_topic(text: str, history: list[ChatTurn]) -> str | None:
     lower = text.lower().strip()
+    if re.search(r"(евро|євро|euro|\beur\b)", lower):
+        return "eur"
+    if re.search(r"(доллар|долар|dollar|\busd\b)", lower):
+        return "usd"
     if FOLLOWUP_OUTDOOR.search(lower):
         return "weather"
     last = last_ha_topic_from_history(history)

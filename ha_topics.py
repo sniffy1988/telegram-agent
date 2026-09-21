@@ -164,10 +164,12 @@ def entity_matches_usd(entity_id: str) -> bool:
 
 def entity_matches_eur(entity_id: str) -> bool:
     el = entity_id.lower()
+    if "open_meteo" in el or "european_aqi" in el:
+        return False
     if "usd" in el and "eur" not in el:
         return False
     return any(m in el for m in EUR_ENTITY_MARKERS) or (
-        "eur" in el and "cartel" in el
+        "cartel" in el and "_eur" in el
     )
 
 FOLLOWUP_PREFIX = re.compile(r"^(а|и|ну)\s+", re.I)
