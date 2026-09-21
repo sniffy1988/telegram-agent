@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
-
-# Cap for ha_query topic "all" (Telegram + Ollama context size).
-ALL_SENSORS_LIST_LIMIT = 60
-
-ALLOWED_DOMAINS = frozenset(
-    {"sensor", "binary_sensor", "weather", "number", "climate"}
-)
 
 # Not room air — outdoor, forecast, or device/hardware probes.
 _NON_INDOOR_TEMP_MARKERS = (
@@ -37,6 +31,8 @@ _NON_INDOOR_TEMP_MARKERS = (
     "usage",
 )
 
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$", re.I)
+
 
 def _entity_domain(entity_id: str) -> str:
     if "." not in entity_id:
@@ -45,7 +41,8 @@ def _entity_domain(entity_id: str) -> str:
 
 
 def _is_allowed_entity(entity_id: str) -> bool:
-    return _entity_domain(entity_id) in ALLOWED_DOMAINS
+    """Read-only: any Home Assistant entity id (all domains)."""
+    return bool(_ENTITY_ID_RE.match(entity_id.strip()))
 
 
 def _is_non_indoor_temperature(entity_id: str, blob: str) -> bool:
@@ -87,6 +84,20 @@ def _is_indoor_temperature_state(st: dict[str, Any]) -> bool:
     return any(h in blob for h in indoor_hints) or "indoor" in eid
 
 
+def _is_pollen_state(st: dict[str, Any]) -> bool:
+    eid = str(st.get("entity_id", "")).lower()
+    attrs = st.get("attributes") or {}
+    fname = str(attrs.get("friendly_name", "")).lower()
+    blob = f"{eid} {fname}"
+    if "pollen" in blob or "ragweed" in blob or "амброз" in blob:
+        return True
+    if "silam" in blob and ("pollen" in blob or "ragweed" in blob or "mugwort" in blob):
+        return True
+    if eid.startswith("weather.") and "pollen" in eid:
+        return True
+    return False
+
+
 def _compact_state(state: dict[str, Any]) -> dict[str, Any]:
     attrs = state.get("attributes") or {}
     unit = attrs.get("unit_of_measurement") or attrs.get("native_unit_of_measurement")
@@ -106,27 +117,50 @@ def _compact_state(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_state_minimal(state: dict[str, Any]) -> dict[str, Any]:
+    attrs = state.get("attributes") or {}
+    name = str(attrs.get("friendly_name") or state.get("entity_id") or "")[:48]
+    return {
+        "id": state.get("entity_id"),
+        "n": name,
+        "v": state.get("state"),
+    }
+
+
 class HomeAssistantTool:
     name = "ha_query"
     description = (
-        "Read current Home Assistant sensor/weather/number states. "
-        "Use for weather, fuel prices, USD/EUR exchange rates, and home facts."
+        "Read current Home Assistant entity states (read-only, all domains). "
+        "Topics: all, weather, indoor, pollen, fuel, usd, eur; or entity id / name fragment."
     )
     input_schema = {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Entity id, friendly name fragment, or topic: all, weather, indoor, fuel, usd, eur",
+                "description": (
+                    "Entity id, friendly name fragment, or topic: "
+                    "all, weather, indoor, pollen, fuel, usd, eur"
+                ),
             }
         },
         "required": ["query"],
     }
 
-    def __init__(self, base_url: str, token: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout: float = 30.0,
+        *,
+        all_entities_limit: int = 500,
+        topic_match_limit: int = 25,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.all_entities_limit = max(1, all_entities_limit)
+        self.topic_match_limit = max(1, topic_match_limit)
 
     async def execute(
         self, arguments: dict[str, Any], context: dict[str, Any]
@@ -188,6 +222,16 @@ class HomeAssistantTool:
                 "living",
                 "kitchen",
             ),
+            "pollen": (
+                "pollen",
+                "ragweed",
+                "ambrosia",
+                "амброз",
+                "пыльц",
+                "silam",
+                "mugwort",
+                "полин",
+            ),
             "weather": (
                 "weather",
                 "open_meteo",
@@ -204,37 +248,44 @@ class HomeAssistantTool:
                 "all",
                 "все датчик",
                 "все sensor",
+                "все сущност",
                 "список датчик",
                 "какие датчик",
                 "перечисли датчик",
                 "all sensor",
+                "everything in ha",
             ),
         }
         topic: str | None = None
-        topic_order = ("all", "indoor", "weather", "fuel", "usd", "eur")
+        topic_order = ("all", "indoor", "pollen", "weather", "fuel", "usd", "eur")
         for t in topic_order:
             kws = topic_keywords[t]
             if q_lower == t or any(k in q_lower for k in kws):
                 topic = t
                 break
 
+        use_minimal = topic == "all"
         matches: list[dict[str, Any]] = []
         for st in filtered:
             eid = st.get("entity_id", "")
             attrs = st.get("attributes") or {}
             fname = str(attrs.get("friendly_name", "")).lower()
             blob = f"{eid} {fname}".lower()
+            compact = _compact_state_minimal if use_minimal else _compact_state
             if topic == "all":
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
             elif topic == "indoor" and _is_indoor_temperature_state(st):
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
+            elif topic == "pollen" and _is_pollen_state(st):
+                matches.append(compact(st))
             elif topic == "weather" and (
-                eid.startswith("weather.")
+                (eid.startswith("weather.") and "pollen" not in eid)
                 or "saveecobot_outdoor" in eid
                 or (
                     eid.startswith("sensor.")
                     and "open_meteo" in eid
                     and "soil" not in eid
+                    and "pollen" not in eid
                     and attrs.get("device_class") == "temperature"
                     and eid.endswith("_temperature")
                 )
@@ -244,17 +295,17 @@ class HomeAssistantTool:
                     and "outdoor" in blob
                 )
             ):
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
             elif topic == "fuel" and (
                 "fuel" in eid or "ukr_fuel" in eid or any(x in blob for x in topic_keywords["fuel"])
             ):
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
             elif topic == "usd" and any(x in blob for x in topic_keywords["usd"]):
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
             elif topic == "eur" and any(x in blob for x in topic_keywords["eur"]):
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
             elif query in eid or q_lower in fname or q_lower in eid:
-                matches.append(_compact_state(st))
+                matches.append(compact(st))
 
         if not matches and "." in query:
             eid = query.strip()
@@ -268,11 +319,12 @@ class HomeAssistantTool:
                         if resp.status_code == 200:
                             st = resp.json()
                             if isinstance(st, dict) and _is_allowed_entity(eid):
-                                matches.append(_compact_state(st))
+                                fn = _compact_state_minimal if use_minimal else _compact_state
+                                matches.append(fn(st))
                         else:
                             return {
                                 "ok": False,
-                                "error": f"entity_not_found_or_denied",
+                                "error": "entity_not_found_or_denied",
                                 "states": [],
                             }
                 except httpx.RequestError:
@@ -284,27 +336,36 @@ class HomeAssistantTool:
             else:
                 return {
                     "ok": False,
-                    "error": "entity_domain_not_allowed",
+                    "error": "invalid_entity_id",
                     "states": [],
                 }
 
         if not matches:
             logger.info(
-                "[ha] no matches topic=%s query=%r allowlisted_states=%s",
+                "[ha] no matches topic=%s query=%r states_in_ha=%s",
                 topic,
                 query,
                 len(filtered),
             )
             return {"ok": False, "error": "no_matching_entities", "states": []}
 
-        matches.sort(key=lambda m: str(m.get("entity_id", "")))
-        limit = ALL_SENSORS_LIST_LIMIT if topic == "all" else 15
+        matches.sort(key=lambda m: str(m.get("entity_id") or m.get("id", "")))
+        if topic == "all":
+            limit = self.all_entities_limit
+        elif topic:
+            limit = self.topic_match_limit
+        else:
+            limit = self.topic_match_limit
         page = matches[:limit]
         logger.info(
-            "[ha] matched %s entities (topic=%s): %s",
+            "[ha] matched %s entities (topic=%s, returned=%s): %s",
             len(matches),
             topic,
-            [m.get("entity_id") for m in page[:5]],
+            len(page),
+            [
+                m.get("entity_id") or m.get("id")
+                for m in page[:5]
+            ],
         )
         out: dict[str, Any] = {"ok": True, "states": page}
         if topic == "all" and len(matches) > limit:

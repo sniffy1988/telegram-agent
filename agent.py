@@ -97,6 +97,11 @@ def _ha_failure_message(user_text: str, error: str | None = None) -> str:
         )
     if error == "no_matching_entities":
         lower = user_text.lower()
+        if any(w in lower for w in ("амброз", "ragweed", "пыльц", "pollen", "silam")):
+            return (
+                "Не нашёл в Home Assistant датчики пыльцы/амброзии "
+                "(Open-Meteo ragweed, SILAM)."
+            )
         if any(w in lower for w in ("комнат", "indoor", "помещен", "внутри")):
             return (
                 "Не нашёл в Home Assistant датчики температуры в помещениях "
@@ -130,6 +135,21 @@ def _should_short_circuit_ha_failure(
         return False
     # HA was queried and failed — never let the LLM invent weather/FX/fuel values.
     return True
+
+
+def _tool_results_for_prompt(tool_results: dict[str, Any], max_chars: int) -> str:
+    text = json.dumps(tool_results, ensure_ascii=False)
+    if len(text) <= max_chars:
+        return text
+    ha = tool_results.get("ha_query")
+    if isinstance(ha, dict) and ha.get("truncated"):
+        note = (
+            " If ha_query.truncated is true, tell the user how many entities were "
+            "returned vs ha_query.total; do not invent entities not in the list."
+        )
+    else:
+        note = ""
+    return text[: max(0, max_chars - 24)] + "…(json truncated)" + note
 
 
 def _safe_tool_log(payload: dict[str, Any]) -> dict[str, Any]:
@@ -260,7 +280,9 @@ class Agent:
         messages.append({"role": "user", "content": user_content})
 
         if tool_results:
-            compact = json.dumps(tool_results, ensure_ascii=False)[:6000]
+            compact = _tool_results_for_prompt(
+                tool_results, self.settings.ha_tool_json_max_chars
+            )
             messages.append(
                 {
                     "role": "user",
@@ -322,7 +344,9 @@ class Agent:
                             return AgentResult(
                                 text=msg_text, photos=photos, used_tools=used_tools
                             )
-                        compact = json.dumps(tool_results, ensure_ascii=False)[:6000]
+                        compact = _tool_results_for_prompt(
+                            tool_results, self.settings.ha_tool_json_max_chars
+                        )
                         messages.append(
                             {
                                 "role": "user",

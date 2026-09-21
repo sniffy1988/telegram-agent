@@ -78,9 +78,28 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "поиском в интернете и картинками.\n"
         "Если отправите фото для обратного поиска, изображение может быть "
         "передано внешнему поисковому сервису (best-effort).\n"
-        "Команды: /clear, /memory, /forget"
+        "Команды: /clear, /memory, /forget, /chatid"
     )
     await update.effective_message.reply_text(text)
+
+
+async def chatid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Always available (even before TELEGRAM_ALLOWED_CHAT_IDS is set)."""
+    if not update.effective_message or not update.effective_chat:
+        return
+    chat = update.effective_chat
+    user = update.effective_user
+    lines = [
+        f"chat_id: {chat.id}",
+        f"chat_type: {chat.type}",
+    ]
+    if user:
+        lines.append(f"user_id: {user.id}")
+    lines.append(
+        "Для .env: TELEGRAM_ALLOWED_CHAT_IDS="
+        + (str(user.id) if user else str(chat.id))
+    )
+    await update.effective_message.reply_text("\n".join(lines))
 
 
 async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -304,7 +323,14 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def build_registry(settings) -> ToolRegistry:
     reg = ToolRegistry()
-    reg.register(HomeAssistantTool(settings.home_assistant_url, settings.home_assistant_token))
+    reg.register(
+        HomeAssistantTool(
+            settings.home_assistant_url,
+            settings.home_assistant_token,
+            all_entities_limit=settings.ha_all_entities_limit,
+            topic_match_limit=settings.ha_topic_match_limit,
+        )
+    )
     reg.register(WebSearchTool(settings.max_search_results))
     reg.register(ImageSearchTool(settings.max_images))
     reg.register(ReverseImageTool())
@@ -349,6 +375,7 @@ def main() -> None:
     app.bot_data["ollama"] = ollama
     app.bot_data["allowed_chat_ids"] = settings.telegram_allowed_chat_ids
 
+    app.add_handler(CommandHandler("chatid", chatid_cmd))
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("clear", clear_cmd))
     app.add_handler(CommandHandler("memory", memory_cmd))

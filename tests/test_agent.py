@@ -24,6 +24,9 @@ def _settings(tmp_path) -> Settings:
         home_assistant_token="t",
         max_search_results=3,
         max_images=2,
+        ha_all_entities_limit=500,
+        ha_topic_match_limit=25,
+        ha_tool_json_max_chars=14000,
     )
 
 

@@ -23,11 +23,16 @@ def route_tools(
         calls.append(RoutedToolCall("reverse_image", {}))
 
     if re.search(
-        r"(все\s+датчик|список\s+датчик|какие\s+датчик|перечисли\s+датчик|"
-        r"all\s+sensors?|list\s+sensors?)",
+        r"(все\s+датчик|все\s+сущност|список\s+датчик|какие\s+датчик|перечисли\s+датчик|"
+        r"all\s+sensors?|list\s+sensors?|everything\s+in\s+ha)",
         lower,
     ):
         calls.append(RoutedToolCall("ha_query", {"query": "all"}))
+    elif re.search(
+        r"(амброз|ragweed|пыльц|pollen|silam\s+pollen|полин)",
+        lower,
+    ):
+        calls.append(RoutedToolCall("ha_query", {"query": "pollen"}))
     elif re.search(
         r"(комнат\w*|помещен\w*|indoor|inside|в\s+доме|в\s+квартире|внутри)",
         lower,
@@ -82,7 +87,8 @@ def is_ha_factual_query(text: str) -> bool:
     return bool(
         re.search(
             r"(курс|долар|dollar|usd|eur|євро|погод|weather|бензин|fuel|азс|"
-            r"температур|temperature|градус|комнат|indoor|помещен)",
+            r"температур|temperature|градус|комнат|indoor|помещен|"
+            r"амброз|ragweed|пыльц|pollen)",
             lower,
         )
     )

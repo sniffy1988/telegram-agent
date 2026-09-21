@@ -8,7 +8,7 @@ from tools_ha import HomeAssistantTool, _is_allowed_entity
 
 
 @pytest.mark.asyncio
-async def test_domain_allowlist_filters_light() -> None:
+async def test_usd_topic_does_not_match_light() -> None:
     states = [
         {
             "entity_id": "light.kitchen",
@@ -41,7 +41,8 @@ async def test_domain_allowlist_filters_light() -> None:
     assert result["ok"] is True
     assert len(result["states"]) == 1
     assert result["states"][0]["entity_id"] == "sensor.usd_buy"
-    assert not _is_allowed_entity("switch.foo")
+    assert _is_allowed_entity("switch.foo")
+    assert not _is_allowed_entity("not-an-entity")
 
 
 @pytest.mark.asyncio
@@ -112,7 +113,7 @@ async def test_indoor_temperature_filters_outdoor_and_hardware() -> None:
 
 
 @pytest.mark.asyncio
-async def test_all_sensors_returns_allowlisted_domains() -> None:
+async def test_all_returns_every_domain() -> None:
     states = [
         {
             "entity_id": "sensor.a",
@@ -146,5 +147,53 @@ async def test_all_sensors_returns_allowlisted_domains() -> None:
         result = await tool.execute({"query": "all"}, {})
 
     assert result["ok"] is True
+    ids = {s["id"] for s in result["states"]}
+    assert ids == {"binary_sensor.door", "light.kitchen", "sensor.a"}
+
+
+@pytest.mark.asyncio
+async def test_pollen_topic_ragweed_and_silam() -> None:
+    states = [
+        {
+            "entity_id": "sensor.open_meteo_ragweed_pollen",
+            "state": "109.8",
+            "attributes": {"friendly_name": "Open-Meteo Ragweed pollen"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "sensor.silam_pollen_home_ragweed",
+            "state": "376",
+            "attributes": {"friendly_name": "SILAM Pollen - Home Ragweed"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "sensor.open_meteo_temperature",
+            "state": "23",
+            "attributes": {"friendly_name": "Open-Meteo Temperature"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+        {
+            "entity_id": "weather.silam_pollen_home_forecast",
+            "state": "very_high",
+            "attributes": {"friendly_name": "SILAM Pollen Forecast"},
+            "last_updated": "2026-01-01T00:00:00Z",
+        },
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = states
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("tools_ha.httpx.AsyncClient", return_value=mock_client):
+        tool = HomeAssistantTool("http://ha.test", "token")
+        result = await tool.execute({"query": "pollen"}, {})
+
+    assert result["ok"] is True
     ids = {s["entity_id"] for s in result["states"]}
-    assert ids == {"binary_sensor.door", "sensor.a"}
+    assert "sensor.open_meteo_ragweed_pollen" in ids
+    assert "sensor.silam_pollen_home_ragweed" in ids
+    assert "weather.silam_pollen_home_forecast" in ids
+    assert "sensor.open_meteo_temperature" not in ids

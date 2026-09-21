@@ -25,6 +25,9 @@ class Settings:
     home_assistant_token: str
     max_search_results: int
     max_images: int
+    ha_all_entities_limit: int
+    ha_topic_match_limit: int
+    ha_tool_json_max_chars: int
 
 
 def _parse_chat_ids(raw: str) -> frozenset[int]:
@@ -87,4 +90,7 @@ def load_settings() -> Settings:
         home_assistant_token=os.getenv("HOME_ASSISTANT_TOKEN", "").strip(),
         max_search_results=_int_env("MAX_SEARCH_RESULTS", 5),
         max_images=_int_env("MAX_IMAGES", 3),
+        ha_all_entities_limit=_int_env("HA_ALL_ENTITIES_LIMIT", 500),
+        ha_topic_match_limit=_int_env("HA_TOPIC_MATCH_LIMIT", 25),
+        ha_tool_json_max_chars=_int_env("HA_TOOL_JSON_MAX_CHARS", 14000),
     )
